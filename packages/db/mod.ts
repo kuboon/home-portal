@@ -48,3 +48,9 @@ export {
   type RepostOf,
   type Thread,
 } from "./threads.ts";
+export {
+  MAX_STAMPS_PER_MESSAGE,
+  reactionsByMessage,
+  type ReactionSummary,
+  toggleReaction,
+} from "./reactions.ts";

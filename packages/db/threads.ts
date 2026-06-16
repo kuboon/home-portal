@@ -9,6 +9,7 @@
 import { monotonicUlid } from "@std/ulid";
 import { db } from "./client.ts";
 import { HomeError } from "./homes.ts";
+import { reactionsByMessage, type ReactionSummary } from "./reactions.ts";
 
 /** Max message length, in characters. */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -42,6 +43,8 @@ export interface Message {
   repostOf: string | null;
   /** The referenced original's summary when this is a repost. */
   repost: RepostOf | null;
+  /** Aggregated reactions (populated by `listMessages`). */
+  reactions: ReactionSummary[];
 }
 
 function rowToThread(row: Record<string, unknown>): Thread {
@@ -179,16 +182,26 @@ function rowToMessage(row: Record<string, unknown>): Message {
     deleted,
     repostOf,
     repost,
+    reactions: [],
   };
 }
 
-/** Messages in a thread, oldest first. Deleted ones remain as tombstones. */
-export async function listMessages(threadId: string): Promise<Message[]> {
+/**
+ * Messages in a thread, oldest first. Deleted ones remain as tombstones.
+ * Reactions are attached for `viewerId` (so `mine` is correct).
+ */
+export async function listMessages(
+  threadId: string,
+  viewerId = "",
+): Promise<Message[]> {
   const { rows } = await (await db()).execute({
     sql: `${MESSAGE_SELECT} WHERE m.thread_id = ? ORDER BY m.created_at`,
     args: [threadId],
   });
-  return rows.map(rowToMessage);
+  const messages = rows.map(rowToMessage);
+  const reactions = await reactionsByMessage(threadId, viewerId);
+  for (const m of messages) m.reactions = reactions.get(m.id) ?? [];
+  return messages;
 }
 
 /**
