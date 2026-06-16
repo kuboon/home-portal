@@ -17,10 +17,12 @@
   },
   "permissions": {
     "default": {
-      "env": ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
+      "env": true,
       "net": true,
       "read": true,
-      "write": true
+      "write": true,
+      "ffi": true,
+      "sys": true
     }
   }
 }

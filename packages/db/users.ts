@@ -29,7 +29,7 @@ export interface UpsertUserInput {
  */
 export async function upsertUser(input: UpsertUserInput): Promise<User> {
   const isAgent = input.isAgent ? 1 : 0;
-  await db().execute({
+  await (await db()).execute({
     sql: "INSERT INTO users (id, display_name, is_agent) VALUES (?, ?, ?) " +
       "ON CONFLICT(id) DO UPDATE SET " +
       "display_name = excluded.display_name, " +
@@ -44,7 +44,7 @@ export async function upsertUser(input: UpsertUserInput): Promise<User> {
 
 /** Fetch a user by id, or `null` if not found. */
 export async function getUser(id: string): Promise<User | null> {
-  const { rows } = await db().execute({
+  const { rows } = await (await db()).execute({
     sql: "SELECT id, display_name, is_agent, created_at, updated_at " +
       "FROM users WHERE id = ?",
     args: [id],

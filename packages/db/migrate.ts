@@ -13,7 +13,7 @@ import { db } from "./client.ts";
 const MIGRATIONS_DIR = new URL("./migrations/", import.meta.url);
 
 async function appliedMigrations(): Promise<Set<string>> {
-  const client = db();
+  const client = await db();
   await client.execute(
     "CREATE TABLE IF NOT EXISTS _migrations (" +
       "name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))",
@@ -30,17 +30,25 @@ function listMigrationFiles(): string[] {
   return names.sort();
 }
 
-/** Split a `.sql` file into individual statements (naive `;` splitter). */
+/**
+ * Split a `.sql` file into individual statements: strip whole-line `--`
+ * comments first (so a leading comment block doesn't swallow the statement
+ * that follows it), then split on `;`.
+ */
 function statements(sql: string): string[] {
-  return sql
+  const withoutComments = sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
+  return withoutComments
     .split(";")
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
+    .filter((s) => s.length > 0);
 }
 
 /** Apply all pending migrations. Returns the names that were applied. */
 export async function migrate(): Promise<string[]> {
-  const client = db();
+  const client = await db();
   const done = await appliedMigrations();
   const applied: string[] = [];
 
