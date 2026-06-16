@@ -14,3 +14,19 @@ export {
   type UpsertUserInput,
   type User,
 } from "./users.ts";
+export {
+  addMember,
+  createHome,
+  getHome,
+  getRole,
+  type Home,
+  HomeError,
+  type HomeWithRole,
+  listHomesForUser,
+  listMembers,
+  MAX_MEMBERS,
+  type Member,
+  removeMember,
+  type Role,
+  setMemberRole,
+} from "./homes.ts";
