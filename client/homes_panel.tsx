@@ -48,7 +48,10 @@ interface Message {
   editedAt: string | null;
   deleted: boolean;
   repost: { authorName: string; body: string; deleted: boolean } | null;
+  reactions: { stamp: string; count: number; mine: boolean }[];
 }
+
+const DEFAULT_STAMPS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
 
 export const HomesPanel = clientEntry(
   "/homes_panel.js#HomesPanel",
@@ -72,6 +75,8 @@ export const HomesPanel = clientEntry(
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
     let joinCode = "";
     let themeDraft = "";
+    let recentStamps: string[] = [];
+    let paletteFor: string | null = null;
 
     /** Inject the selected home's custom CSS into a dedicated <style>. */
     const applyTheme = (css: string) => {
@@ -173,6 +178,23 @@ export const HomesPanel = clientEntry(
         }
       })().catch(() => {});
     };
+
+    const loadRecentStamps = async () => {
+      const data = await api("/api/stamps/recent") as { stamps: string[] };
+      recentStamps = data.stamps;
+    };
+
+    const onToggleReaction = (messageId: string, stamp: string) =>
+      run(async () => {
+        paletteFor = null;
+        await api(`/api/messages/${messageId}/reactions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stamp }),
+        });
+        if (selectedThreadId) await loadMessages(selectedThreadId);
+        await loadRecentStamps();
+      });
 
     const run = async (fn: () => Promise<void>) => {
       error = "";
@@ -372,7 +394,10 @@ export const HomesPanel = clientEntry(
           const session = await ensureSession(handle.props.idpOrigin);
           fetchDpop = session.fetchDpop;
           userId = session.userId;
-          if (userId) await loadHomes();
+          if (userId) {
+            await loadHomes();
+            await loadRecentStamps();
+          }
         } catch (e) {
           error = (e as Error).message;
         } finally {
@@ -506,7 +531,48 @@ export const HomesPanel = clientEntry(
                 </button>
               )
               : null}
+            {selectedArchived() ? null : (
+              <button
+                type="button"
+                class="link link-hover text-xs ml-2"
+                mix={[on("click", () => {
+                  paletteFor = paletteFor === m.id ? null : m.id;
+                  handle.update();
+                })]}
+              >
+                ＋スタンプ
+              </button>
+            )}
           </div>
+          {m.reactions.length > 0 || paletteFor === m.id
+            ? (
+              <div class="chat-footer flex flex-wrap gap-1 mt-1">
+                {m.reactions.map((r) => (
+                  <button
+                    type="button"
+                    class={`badge ${r.mine ? "badge-primary" : "badge-ghost"}`}
+                    disabled={selectedArchived()}
+                    mix={[on("click", () => onToggleReaction(m.id, r.stamp))]}
+                  >
+                    {r.stamp} {r.count}
+                  </button>
+                ))}
+                {paletteFor === m.id
+                  ? [...new Set([...recentStamps, ...DEFAULT_STAMPS])].map((
+                    s,
+                  ) => (
+                    <button
+                      type="button"
+                      class="btn btn-xs"
+                      mix={[on("click", () => onToggleReaction(m.id, s))]}
+                    >
+                      {s}
+                    </button>
+                  ))
+                  : null}
+              </div>
+            )
+            : null}
         </div>
       );
     };

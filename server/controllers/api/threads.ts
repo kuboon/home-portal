@@ -19,10 +19,12 @@ import {
   listThreads,
   postMessage,
   repostMessage,
+  toggleReaction,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { signalThread, watchThread } from "../../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
+import { getRecentStamps, pushRecentStamp } from "../../stamps.ts";
 import type { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -84,7 +86,7 @@ export const threadsController = {
         return Response.json({ error: "not found" }, { status: 404 });
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
-      return Response.json({ messages: await listMessages(threadId) });
+      return Response.json({ messages: await listMessages(threadId, userId) });
     },
 
     async post(context) {
@@ -246,6 +248,39 @@ export const threadsController = {
       await deleteMessage(messageId);
       await signalThread(ctx.threadId);
       return Response.json({ ok: true });
+    },
+
+    async react(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { messageId } = context.params;
+      const ctx = await getMessageContext(messageId);
+      if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
+      if (!(await getRole(ctx.homeId, userId))) return forbidden();
+      const thread = await getThread(ctx.threadId);
+      if (thread?.archivedAt) {
+        return Response.json({ error: "スレッドはアーカイブ済みです" }, {
+          status: 409,
+        });
+      }
+      const body = await context.request.json() as { stamp?: string };
+      if (!body.stamp) {
+        return Response.json({ error: "stamp is required" }, { status: 400 });
+      }
+      try {
+        const result = await toggleReaction(messageId, userId, body.stamp);
+        if (result.added) await pushRecentStamp(userId, body.stamp);
+        await signalThread(ctx.threadId);
+        return Response.json(result);
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async recentStamps(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      return Response.json({ stamps: await getRecentStamps(userId) });
     },
   },
 } satisfies Controller<typeof routes.threadsApi>;
