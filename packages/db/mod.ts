@@ -32,9 +32,11 @@ export {
 } from "./homes.ts";
 export {
   createThread,
+  deleteMessage,
+  editMessage,
+  getMessageContext,
   getThread,
   listMessages,
-  listMessagesAfter,
   listThreads,
   MAX_MESSAGE_LENGTH,
   type Message,
