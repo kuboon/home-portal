@@ -66,6 +66,9 @@ export const HomesPanel = clientEntry(
     let newMessage = "";
     let fetchDpop: FetchDpop | null = null;
     let streamAbort: AbortController | null = null;
+    let inviteToken: string | null = null;
+    let inviteTimer: ReturnType<typeof setInterval> | null = null;
+    let joinCode = "";
 
     const selectedRole = () => homes.find((h) => h.id === selectedId)?.role;
 
@@ -173,14 +176,57 @@ export const HomesPanel = clientEntry(
         await loadHomes();
       });
 
+    const stopInviteHeartbeat = () => {
+      if (inviteTimer !== null) {
+        clearInterval(inviteTimer);
+        inviteTimer = null;
+      }
+      inviteToken = null;
+    };
+
     const onSelect = (homeId: string) =>
       run(async () => {
         streamAbort?.abort();
+        stopInviteHeartbeat();
         selectedId = homeId;
         selectedThreadId = null;
         messages = [];
         await loadMembers(homeId);
         await loadThreads(homeId);
+      });
+
+    const onInvite = () =>
+      run(async () => {
+        if (!selectedId) return;
+        const data = await api(`/api/homes/${selectedId}/invite`, {
+          method: "POST",
+        }) as { token: string };
+        inviteToken = data.token;
+        if (inviteTimer !== null) clearInterval(inviteTimer);
+        // Keep the token alive while the invite is shown (design: 60s TTL).
+        inviteTimer = setInterval(() => {
+          if (inviteToken && fetchDpop) {
+            fetchDpop(`/api/invites/${inviteToken}/heartbeat`, {
+              method: "POST",
+            }).catch(() => {});
+          }
+        }, 20_000);
+      });
+
+    const onCloseInvite = () =>
+      run(async () => {
+        const token = inviteToken;
+        stopInviteHeartbeat();
+        if (token) await api(`/api/invites/${token}`, { method: "DELETE" });
+      });
+
+    const onJoin = () =>
+      run(async () => {
+        const code = joinCode.trim();
+        if (!code) return;
+        await api(`/api/invites/${code}/accept`, { method: "POST" });
+        joinCode = "";
+        await loadHomes();
       });
 
     const onCreateThread = () =>
@@ -492,6 +538,24 @@ export const HomesPanel = clientEntry(
                     ))}
                   </ul>
                 )}
+              <div class="divider my-1"></div>
+              <div class="join">
+                <input
+                  class="input input-bordered input-sm join-item"
+                  placeholder="招待コードで参加"
+                  value={joinCode}
+                  mix={[on<HTMLInputElement>("input", (e) => {
+                    joinCode = (e.target as HTMLInputElement).value;
+                  })]}
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm join-item"
+                  mix={[on("click", onJoin)]}
+                >
+                  参加
+                </button>
+              </div>
             </div>
           </div>
 
@@ -519,6 +583,37 @@ export const HomesPanel = clientEntry(
                           >
                             メンバー追加
                           </button>
+                        </div>
+                      )
+                      : null}
+                    {selectedRole() === "admin"
+                      ? (
+                        <div class="mt-2">
+                          {inviteToken
+                            ? (
+                              <div class="alert alert-soft items-center gap-2">
+                                <span class="text-sm">
+                                  招待コード（この画面を開いている間有効）:{" "}
+                                  <code>{inviteToken}</code>
+                                </span>
+                                <button
+                                  type="button"
+                                  class="btn btn-xs"
+                                  mix={[on("click", onCloseInvite)]}
+                                >
+                                  閉じる
+                                </button>
+                              </div>
+                            )
+                            : (
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-outline"
+                                mix={[on("click", onInvite)]}
+                              >
+                                招待コードを発行
+                              </button>
+                            )}
                         </div>
                       )
                       : null}

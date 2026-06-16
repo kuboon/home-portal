@@ -5,8 +5,8 @@
  * `/api/users/sync` after IdP sign-in); requests without it get 401. Mutations
  * that manage membership require the caller to be an admin of the home.
  *
- * Member addition here is by existing `userId` (the admin types it in) — the
- * ephemeral invite-token flow from the design doc is a later milestone.
+ * Members join either by an admin typing an existing `userId`, or via an
+ * ephemeral invite token (`invite` issues one; see `invites.ts`).
  */
 
 import type { Controller } from "@remix-run/fetch-router";
@@ -23,6 +23,7 @@ import {
   setMemberRole,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
+import { createInvite, INVITE_TTL_MS } from "../../invites.ts";
 import type { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -145,6 +146,15 @@ export const homesController = {
       } catch (error) {
         return handleError(error);
       }
+    },
+
+    async invite(context) {
+      const session = context.get(DpopSession);
+      const { homeId } = context.params;
+      const auth = await requireAdmin(session, homeId);
+      if (auth instanceof Response) return auth;
+      const token = await createInvite(homeId);
+      return Response.json({ token, ttlMs: INVITE_TTL_MS }, { status: 201 });
     },
   },
 } satisfies Controller<typeof routes.homesApi>;
