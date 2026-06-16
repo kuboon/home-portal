@@ -20,10 +20,12 @@ import {
   listMembers,
   removeMember,
   type Role,
+  setHomeTheme,
   setMemberRole,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { createInvite, INVITE_TTL_MS } from "../../invites.ts";
+import { sanitizeThemeCss } from "../../theme.ts";
 import type { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -155,6 +157,17 @@ export const homesController = {
       if (auth instanceof Response) return auth;
       const token = await createInvite(homeId);
       return Response.json({ token, ttlMs: INVITE_TTL_MS }, { status: 201 });
+    },
+
+    async setTheme(context) {
+      const session = context.get(DpopSession);
+      const { homeId } = context.params;
+      const auth = await requireAdmin(session, homeId);
+      if (auth instanceof Response) return auth;
+      const body = await context.request.json() as { css?: string };
+      const css = sanitizeThemeCss(body.css ?? "");
+      await setHomeTheme(homeId, css);
+      return Response.json({ ok: true, themeCss: css });
     },
   },
 } satisfies Controller<typeof routes.homesApi>;

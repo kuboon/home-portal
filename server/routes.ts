@@ -26,6 +26,8 @@ export const routes = route({
     removeMember: del("/:homeId/members/:userId"),
     /** POST /api/homes/:homeId/invite — issue an invite token (admin). */
     invite: post("/:homeId/invite"),
+    /** POST /api/homes/:homeId/theme — set the home's custom CSS (admin). */
+    setTheme: post("/:homeId/theme"),
   }),
   invitesApi: route("api/invites", {
     /** POST /api/invites/:token/heartbeat — keep the invite alive (admin). */

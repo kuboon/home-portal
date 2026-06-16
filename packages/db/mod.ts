@@ -28,6 +28,7 @@ export {
   type Member,
   removeMember,
   type Role,
+  setHomeTheme,
   setMemberRole,
 } from "./homes.ts";
 export {

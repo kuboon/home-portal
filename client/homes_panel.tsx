@@ -23,6 +23,7 @@ interface HomeWithRole {
   id: string;
   name: string;
   role: "admin" | "member";
+  themeCss: string;
 }
 
 interface Member {
@@ -70,6 +71,24 @@ export const HomesPanel = clientEntry(
     let inviteToken: string | null = null;
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
     let joinCode = "";
+    let themeDraft = "";
+
+    /** Inject the selected home's custom CSS into a dedicated <style>. */
+    const applyTheme = (css: string) => {
+      if (typeof document === "undefined") return;
+      const id = "home-theme";
+      let el = document.getElementById(id) as HTMLStyleElement | null;
+      if (!css) {
+        el?.remove();
+        return;
+      }
+      if (!el) {
+        el = document.createElement("style");
+        el.id = id;
+        document.head.appendChild(el);
+      }
+      el.textContent = css;
+    };
 
     const selectedRole = () => homes.find((h) => h.id === selectedId)?.role;
     const selectedArchived = () =>
@@ -194,8 +213,24 @@ export const HomesPanel = clientEntry(
         selectedId = homeId;
         selectedThreadId = null;
         messages = [];
+        const home = homes.find((h) => h.id === homeId);
+        themeDraft = home?.themeCss ?? "";
+        applyTheme(themeDraft);
         await loadMembers(homeId);
         await loadThreads(homeId);
+      });
+
+    const onSaveTheme = () =>
+      run(async () => {
+        if (!selectedId) return;
+        const data = await api(`/api/homes/${selectedId}/theme`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ css: themeDraft }),
+        }) as { themeCss: string };
+        themeDraft = data.themeCss; // server-sanitized
+        await loadHomes();
+        applyTheme(themeDraft);
       });
 
     const onInvite = () =>
@@ -634,6 +669,40 @@ export const HomesPanel = clientEntry(
                     </table>
                   </div>
                 </div>
+
+                {selectedRole() === "admin"
+                  ? (
+                    <div class="card card-border bg-base-100">
+                      <div class="card-body">
+                        <h2 class="card-title">テーマ（カスタム CSS）</h2>
+                        <p class="text-xs opacity-60">
+                          url() や @import
+                          などのネットワーク取得は保存時に無効化されます。
+                        </p>
+                        <textarea
+                          class="textarea textarea-bordered font-mono text-sm"
+                          rows={4}
+                          placeholder=".chat-bubble { background: #fde; }"
+                          value={themeDraft}
+                          mix={[on<HTMLTextAreaElement>("input", (e) => {
+                            themeDraft =
+                              (e.target as HTMLTextAreaElement).value;
+                          })]}
+                        >
+                        </textarea>
+                        <div class="card-actions mt-2">
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            mix={[on("click", onSaveTheme)]}
+                          >
+                            テーマを保存
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                  : null}
 
                 <div class="card card-border bg-base-100">
                   <div class="card-body">
