@@ -24,6 +24,16 @@ export const routes = route({
     setRole: post("/:homeId/members/:userId/role"),
     /** DELETE /api/homes/:homeId/members/:userId — remove member (admin). */
     removeMember: del("/:homeId/members/:userId"),
+    /** POST /api/homes/:homeId/invite — issue an invite token (admin). */
+    invite: post("/:homeId/invite"),
+  }),
+  invitesApi: route("api/invites", {
+    /** POST /api/invites/:token/heartbeat — keep the invite alive (admin). */
+    heartbeat: post("/:token/heartbeat"),
+    /** DELETE /api/invites/:token — close the invite (admin). */
+    close: del("/:token"),
+    /** POST /api/invites/:token/accept — join the home (signed-in user). */
+    accept: post("/:token/accept"),
   }),
   threadsApi: route("api", {
     /** GET /api/homes/:homeId/threads — threads in a home (members). */
