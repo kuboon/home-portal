@@ -53,6 +53,9 @@ export function Document(handle: Handle<DocumentProps>) {
                 <a href={routes.welcome.href()} rmx-target="content">Home</a>
               </li>
               <li>
+                <a href={routes.homes.href()} rmx-target="content">Homes</a>
+              </li>
+              <li>
                 <a href={routes.signin.href()} rmx-target="content">Sign In</a>
               </li>
             </ul>

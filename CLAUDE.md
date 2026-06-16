@@ -19,7 +19,7 @@ client / server を分離した Deno workspaces。
 - `bundler/` — `Deno.bundle` で client を `server/bundled/*.js`
   に、Tailwind/daisyUI を `server/bundled/style.css` にビルド。
 - `packages/db/` — Turso (libSQL) データ層。`client.ts` / `migrate.ts` /
-  `migrations/` / `users.ts`。
+  `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）。
 - `packages/session-storage-kv/` — `@remix-run/session` の `SessionStorage` を
   `KvRepo` で実装（reference から取り込み）。
 - `packages/remix-dpop-session-middleware/` — DPoP セッション
@@ -48,7 +48,7 @@ client / server を分離した Deno workspaces。
 ```bash
 deno task dev       # bundler 実行 + server を --watch 起動
 deno task migrate   # Turso にマイグレーション適用（.env 必要）
-deno task test      # ユニットテスト（DB 必須テストは TURSO_DATABASE_URL 未設定なら skip）
+deno task test      # ユニットテスト（DB テストは :memory: で実行）
 deno task check     # deno check + lint + fmt --check
 ```
 
@@ -61,6 +61,8 @@ deno task check     # deno check + lint + fmt --check
 
 ## スコープ（段階的実装）
 
-現状は **基盤**（雛形・データ層・認証・CI/デプロイ）まで。後続で Home / メンバー
-/ Thread / Message / Repost / リアルタイム / 招待 / エージェント・MCP / Web Push
-通知 / モデレーション / アーカイブ / CSS テーマ / スタンプ を積み上げる。
+**基盤**（雛形・データ層・認証・CI/デプロイ）+ **Home /
+メンバー管理**（作成・一覧・ admin/member ロール・メンバー追加(userId
+指定)/削除）まで実装済み。後続で Thread / Message / Repost / リアルタイム /
+招待トークン / エージェント・MCP / Web Push 通知 / モデレーション / アーカイブ /
+CSS テーマ / スタンプ を積み上げる。
