@@ -22,6 +22,7 @@ import {
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { signalThread, watchThread } from "../../realtime.ts";
+import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import type { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -33,6 +34,10 @@ const unauthorized = () =>
   Response.json({ error: "not signed in" }, { status: 401 });
 const forbidden = () =>
   Response.json({ error: "not a member" }, { status: 403 });
+const rateLimited = () =>
+  Response.json({ error: "送信が速すぎます。少し待ってください。" }, {
+    status: 429,
+  });
 
 function handleError(error: unknown): Response {
   if (error instanceof HomeError) {
@@ -91,6 +96,7 @@ export const threadsController = {
         return Response.json({ error: "not found" }, { status: 404 });
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
+      if (!(await checkPostLimit(userId))) return rateLimited();
       const body = await context.request.json() as { body?: string };
       try {
         const message = await postMessage({
@@ -134,6 +140,7 @@ export const threadsController = {
           status: 403,
         });
       }
+      if (!(await checkRepostLimit(userId))) return rateLimited();
       try {
         const message = await repostMessage({
           threadId,
