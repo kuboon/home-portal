@@ -1,0 +1,28 @@
+{
+  "name": "@scope/db",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./mod.ts",
+    "./client.ts": "./client.ts",
+    "./users.ts": "./users.ts",
+    "./migrate.ts": "./migrate.ts"
+  },
+  "tasks": {
+    "migrate": "deno run -P --env-file ../../.env migrate.ts",
+    "check": "deno check; deno lint; deno test -P; deno fmt --check"
+  },
+  "imports": {
+    "@libsql/client": "npm:@libsql/client@^0.17.4",
+    "@std/assert": "jsr:@std/assert@^1.0.19"
+  },
+  "permissions": {
+    "default": {
+      "env": true,
+      "net": true,
+      "read": true,
+      "write": true,
+      "ffi": true,
+      "sys": true
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "workspace": [
+    "./packages/session-storage-kv",
+    "./packages/remix-dpop-session-middleware",
+    "./packages/db",
+    "./bundler",
+    "./server",
+    "./client"
+  ],
+  "tasks": {
+    "dev": "deno task --cwd server dev",
+    "serve": "deno task --cwd server serve",
+    "bundle": "deno task --cwd bundler build",
+    "migrate": "deno task --cwd packages/db migrate",
+    "test": "deno test -P",
+    "check": "deno check && deno lint && deno fmt --check"
+  },
+  "permissions": {
+    "default": {}
+  },
+  "test": {
+    "permissions": "default"
+  },
+  "nodeModulesDir": "auto",
+  "unstable": ["bundle", "kv"],
+  "imports": {
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1"
+  }
+}
