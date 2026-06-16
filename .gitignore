@@ -1,0 +1,8 @@
+# Local env
+.env
+
+# Build output
+server/bundled/
+
+# npm compat
+node_modules/

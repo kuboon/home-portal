@@ -1,0 +1,16 @@
+/**
+ * `@scope/db` — Turso (libSQL) data layer for home portal.
+ *
+ * Re-exports the client accessor, the migration runner, and table modules.
+ *
+ * @module
+ */
+
+export { db } from "./client.ts";
+export { migrate } from "./migrate.ts";
+export {
+  getUser,
+  upsertUser,
+  type UpsertUserInput,
+  type User,
+} from "./users.ts";
