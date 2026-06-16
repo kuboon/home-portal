@@ -9,13 +9,14 @@ import type { Controller } from "@remix-run/fetch-router";
 
 import {
   createThread,
+  deleteMessage,
+  editMessage,
+  getMessageContext,
   getRole,
   getThread,
   HomeError,
   listMessages,
-  listMessagesAfter,
   listThreads,
-  type Message,
   postMessage,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
@@ -113,29 +114,16 @@ export const threadsController = {
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
 
-      // Only send messages the client hasn't already loaded.
-      let afterId = new URL(context.request.url).searchParams.get("after") ??
-        "";
+      // The stream emits a lightweight `sync` ping on every change to the
+      // thread (post/edit/delete); the client re-fetches messages. This keeps
+      // edits and deletions in sync, not just appends.
       const encoder = new TextEncoder();
-
       const body = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          const send = (event: string, data: unknown) =>
-            controller.enqueue(
-              encoder.encode(
-                `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
-              ),
-            );
-          const flush = async () => {
-            const fresh: Message[] = await listMessagesAfter(threadId, afterId);
-            for (const m of fresh) {
-              send("message", m);
-              afterId = m.id;
-            }
-          };
+        start(controller) {
+          const ping = (event: string) =>
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
 
-          send("ready", { threadId });
-          await flush();
+          ping("ready");
 
           const reader = watchThread(threadId).getReader();
           const stop = () => {
@@ -146,13 +134,15 @@ export const threadsController = {
           };
           context.request.signal.addEventListener("abort", stop);
 
-          try {
-            while (true) {
-              const { done } = await reader.read();
-              if (done) break;
-              await flush();
-            }
-          } catch { /* client gone */ }
+          (async () => {
+            try {
+              while (true) {
+                const { done } = await reader.read();
+                if (done) break;
+                ping("sync");
+              }
+            } catch { /* client gone */ }
+          })();
         },
       });
 
@@ -163,6 +153,48 @@ export const threadsController = {
           "Connection": "keep-alive",
         },
       });
+    },
+
+    async editMessage(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { messageId } = context.params;
+      const ctx = await getMessageContext(messageId);
+      if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
+      if (ctx.authorId !== userId) {
+        return Response.json({ error: "author only" }, { status: 403 });
+      }
+      const body = await context.request.json() as { body?: string };
+      try {
+        const message = await editMessage({
+          messageId,
+          authorId: userId,
+          body: body.body ?? "",
+        });
+        await signalThread(ctx.threadId);
+        return Response.json({ message });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async deleteMessage(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { messageId } = context.params;
+      const ctx = await getMessageContext(messageId);
+      if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
+      const role = await getRole(ctx.homeId, userId);
+      if (!role) return forbidden();
+      // Author can delete their own; admins can delete (moderate) any.
+      if (ctx.authorId !== userId && role !== "admin") {
+        return Response.json({ error: "author or admin only" }, {
+          status: 403,
+        });
+      }
+      await deleteMessage(messageId);
+      await signalThread(ctx.threadId);
+      return Response.json({ ok: true });
     },
   },
 } satisfies Controller<typeof routes.threadsApi>;

@@ -39,9 +39,12 @@ interface Thread {
 
 interface Message {
   id: string;
+  authorId: string;
   authorName: string;
   body: string;
   createdAt: string;
+  editedAt: string | null;
+  deleted: boolean;
 }
 
 export const HomesPanel = clientEntry(
@@ -108,20 +111,17 @@ export const HomesPanel = clientEntry(
     };
 
     /**
-     * Open the thread's SSE stream and append new messages as they arrive.
-     * Read with fetchDpop (EventSource can't send the DPoP header) and parse
-     * the `event:`/`data:` frames manually.
+     * Open the thread's SSE stream. The server emits a `sync` ping on every
+     * change (post/edit/delete); we re-fetch the thread's messages. Read with
+     * fetchDpop because EventSource can't send the DPoP header.
      */
     const startStream = (threadId: string) => {
       streamAbort?.abort();
       const ac = new AbortController();
       streamAbort = ac;
-      const afterId = messages.length ? messages[messages.length - 1].id : "";
       (async () => {
         const response = await fetchDpop!(
-          `/api/threads/${threadId}/stream?after=${
-            encodeURIComponent(afterId)
-          }`,
+          `/api/threads/${threadId}/stream`,
           { signal: ac.signal },
         );
         if (!response.ok || !response.body) return;
@@ -137,18 +137,10 @@ export const HomesPanel = clientEntry(
           while ((idx = buf.indexOf("\n\n")) >= 0) {
             const block = buf.slice(0, idx);
             buf = buf.slice(idx + 2);
-            const lines = block.split("\n");
-            const event = lines.find((l) => l.startsWith("event:"))
+            const event = block.split("\n").find((l) => l.startsWith("event:"))
               ?.slice(6).trim();
-            const data = lines.find((l) => l.startsWith("data:"))
-              ?.slice(5).trim();
-            if (event !== "message" || !data) continue;
-            const msg = JSON.parse(data) as Message;
-            if (
-              selectedThreadId === threadId &&
-              !messages.some((m) => m.id === msg.id)
-            ) {
-              messages = [...messages, msg];
+            if (event === "sync" && selectedThreadId === threadId) {
+              await loadMessages(threadId);
               handle.update();
             }
           }
@@ -221,6 +213,27 @@ export const HomesPanel = clientEntry(
         });
         newMessage = "";
         await loadMessages(selectedThreadId);
+      });
+
+    const onEditMessage = (messageId: string, current: string) =>
+      run(async () => {
+        const next = globalThis.prompt("メッセージを編集", current);
+        if (next == null) return;
+        const body = next.trim();
+        if (!body) return;
+        await api(`/api/messages/${messageId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body }),
+        });
+        if (selectedThreadId) await loadMessages(selectedThreadId);
+      });
+
+    const onDeleteMessage = (messageId: string) =>
+      run(async () => {
+        if (!globalThis.confirm("このメッセージを削除しますか？")) return;
+        await api(`/api/messages/${messageId}`, { method: "DELETE" });
+        if (selectedThreadId) await loadMessages(selectedThreadId);
       });
 
     const onAddMember = () =>
@@ -325,6 +338,61 @@ export const HomesPanel = clientEntry(
               : null}
           </td>
         </tr>
+      );
+    };
+
+    const messageBubble = (m: Message) => {
+      if (m.deleted) {
+        return (
+          <div class="chat chat-start">
+            <div class="chat-header">{m.authorName}</div>
+            <div class="chat-bubble chat-bubble-neutral italic opacity-60">
+              削除されました
+            </div>
+          </div>
+        );
+      }
+      const mine = m.authorId === userId;
+      const canDelete = mine || selectedRole() === "admin";
+      return (
+        <div class="chat chat-start">
+          <div class="chat-header">
+            {m.authorName}
+            <time class="text-xs opacity-50 ml-1">{m.createdAt}</time>
+            {m.editedAt
+              ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
+              : null}
+          </div>
+          <div class="chat-bubble">{m.body}</div>
+          {mine || canDelete
+            ? (
+              <div class="chat-footer opacity-60">
+                {mine
+                  ? (
+                    <button
+                      type="button"
+                      class="link link-hover text-xs mr-2"
+                      mix={[on("click", () => onEditMessage(m.id, m.body))]}
+                    >
+                      編集
+                    </button>
+                  )
+                  : null}
+                {canDelete
+                  ? (
+                    <button
+                      type="button"
+                      class="link link-hover text-xs"
+                      mix={[on("click", () => onDeleteMessage(m.id))]}
+                    >
+                      削除
+                    </button>
+                  )
+                  : null}
+              </div>
+            )
+            : null}
+        </div>
       );
     };
 
@@ -491,17 +559,7 @@ export const HomesPanel = clientEntry(
                                 まだメッセージがありません。
                               </p>
                             )
-                            : messages.map((m) => (
-                              <div class="chat chat-start">
-                                <div class="chat-header">
-                                  {m.authorName}
-                                  <time class="text-xs opacity-50 ml-1">
-                                    {m.createdAt}
-                                  </time>
-                                </div>
-                                <div class="chat-bubble">{m.body}</div>
-                              </div>
-                            ))}
+                            : messages.map(messageBubble)}
                         </div>
                         <div class="join mt-2 w-full">
                           <input

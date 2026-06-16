@@ -30,6 +30,7 @@ export interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
+  deleted: boolean;
 }
 
 function rowToThread(row: Record<string, unknown>): Thread {
@@ -107,44 +108,76 @@ async function getMessage(id: string): Promise<Message | null> {
 }
 
 function rowToMessage(row: Record<string, unknown>): Message {
+  const deleted = row.deleted_at != null;
   return {
     id: String(row.id),
     threadId: String(row.thread_id),
     authorId: String(row.author_id),
     authorName: String(row.display_name),
-    body: String(row.body),
+    // Deleted messages keep a tombstone (the row) but not their content.
+    body: deleted ? "" : String(row.body),
     createdAt: String(row.created_at),
     editedAt: row.edited_at == null ? null : String(row.edited_at),
+    deleted,
   };
 }
 
-/** Live (non-deleted) messages in a thread, oldest first. */
+/** Messages in a thread, oldest first. Deleted ones remain as tombstones. */
 export async function listMessages(threadId: string): Promise<Message[]> {
   const { rows } = await (await db()).execute({
     sql: "SELECT m.*, u.display_name FROM messages m " +
       "JOIN users u ON u.id = m.author_id " +
-      "WHERE m.thread_id = ? AND m.deleted_at IS NULL " +
-      "ORDER BY m.created_at",
+      "WHERE m.thread_id = ? ORDER BY m.created_at",
     args: [threadId],
   });
   return rows.map(rowToMessage);
 }
 
-/**
- * Live messages newer than `afterId`, oldest first. Message ids are ULIDs, so
- * `id > afterId` is a time-ordered "since" filter. Pass `""` for all. Used by
- * the realtime stream to fetch only what a client hasn't seen yet.
- */
-export async function listMessagesAfter(
-  threadId: string,
-  afterId: string,
-): Promise<Message[]> {
+/** Minimal message info for authorization (who/where), or `null`. */
+export async function getMessageContext(
+  messageId: string,
+): Promise<{ threadId: string; homeId: string; authorId: string } | null> {
   const { rows } = await (await db()).execute({
-    sql: "SELECT m.*, u.display_name FROM messages m " +
-      "JOIN users u ON u.id = m.author_id " +
-      "WHERE m.thread_id = ? AND m.deleted_at IS NULL AND m.id > ? " +
-      "ORDER BY m.created_at",
-    args: [threadId, afterId],
+    sql: "SELECT m.thread_id, m.author_id, t.home_id FROM messages m " +
+      "JOIN threads t ON t.id = m.thread_id WHERE m.id = ?",
+    args: [messageId],
   });
-  return rows.map(rowToMessage);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    threadId: String(row.thread_id),
+    homeId: String(row.home_id),
+    authorId: String(row.author_id),
+  };
+}
+
+/** Edit a message's body in place and stamp `edited_at`. Author only. */
+export async function editMessage(
+  input: { messageId: string; authorId: string; body: string },
+): Promise<Message> {
+  const body = input.body.trim();
+  if (!body) throw new HomeError("message body is required");
+  if (body.length > MAX_MESSAGE_LENGTH) {
+    throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
+  }
+  const result = await (await db()).execute({
+    sql: "UPDATE messages SET body = ?, edited_at = datetime('now') " +
+      "WHERE id = ? AND author_id = ? AND deleted_at IS NULL",
+    args: [body, input.messageId, input.authorId],
+  });
+  if (result.rowsAffected === 0) {
+    throw new HomeError("message not found or not editable", 404);
+  }
+  const message = await getMessage(input.messageId);
+  if (!message) throw new Error("editMessage failed to read back");
+  return message;
+}
+
+/** Soft-delete a message: clear its body, leave a tombstone. Idempotent. */
+export async function deleteMessage(messageId: string): Promise<void> {
+  await (await db()).execute({
+    sql: "UPDATE messages SET deleted_at = datetime('now'), body = '' " +
+      "WHERE id = ? AND deleted_at IS NULL",
+    args: [messageId],
+  });
 }

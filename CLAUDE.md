@@ -66,7 +66,8 @@ deno task check     # deno check + lint + fmt --check
 **基盤**（雛形・データ層・認証・CI/デプロイ）+ **Home /
 メンバー管理**（作成・一覧・ admin/member ロール・メンバー追加(userId
 指定)/削除）+ **Thread / Message**（スレッド作成・一覧、メッセージ投稿・表示）+
-**リアルタイム配信**（SSE + Deno KV watch
-で新着メッセージを即時表示）まで実装済み。後続で Repost / 招待トークン /
-エージェント・MCP / Web Push 通知 / モデレーション / アーカイブ / CSS テーマ /
+**リアルタイム配信**（SSE + Deno KV watch で新着・編集・削除を即時反映）+
+**メッセージ編集・削除**（編集マーク / 論理削除の tombstone、author
+編集・author/admin 削除）まで実装済み。後続で Repost / 招待トークン /
+エージェント・MCP / Web Push 通知 / レート制限 / アーカイブ / CSS テーマ /
 スタンプ を積み上げる。

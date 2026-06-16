@@ -34,7 +34,11 @@ export const routes = route({
     messages: get("/threads/:threadId/messages"),
     /** POST /api/threads/:threadId/messages — post a message (members). */
     post: post("/threads/:threadId/messages"),
-    /** GET /api/threads/:threadId/stream — SSE of new messages (members). */
+    /** GET /api/threads/:threadId/stream — SSE change pings (members). */
     stream: get("/threads/:threadId/stream"),
+    /** POST /api/messages/:messageId — edit a message (author). */
+    editMessage: post("/messages/:messageId"),
+    /** DELETE /api/messages/:messageId — delete a message (author or admin). */
+    deleteMessage: del("/messages/:messageId"),
   }),
 });
