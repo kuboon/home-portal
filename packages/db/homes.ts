@@ -21,6 +21,8 @@ export interface Home {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Admin-set custom CSS (already sanitized). */
+  themeCss: string;
 }
 
 /** A home together with the viewing user's role in it. */
@@ -51,7 +53,20 @@ function rowToHome(row: Record<string, unknown>): Home {
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
+    themeCss: row.theme_css == null ? "" : String(row.theme_css),
   };
+}
+
+/** Set a home's custom theme CSS (caller must sanitize beforehand). */
+export async function setHomeTheme(
+  homeId: string,
+  themeCss: string,
+): Promise<void> {
+  await (await db()).execute({
+    sql: "UPDATE homes SET theme_css = ?, updated_at = datetime('now') " +
+      "WHERE id = ?",
+    args: [themeCss, homeId],
+  });
 }
 
 /** Create a home and make `userId` its first admin. */
