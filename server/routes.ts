@@ -5,6 +5,7 @@ export const routes = route({
   welcome: get("/welcome"),
   signin: get("/signin"),
   homes: get("/homes"),
+  notifications: get("/notifications"),
   api: route("api", {
     /** DPoP-protected: returns the current session info. */
     me: get("/me"),

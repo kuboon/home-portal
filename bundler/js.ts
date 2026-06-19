@@ -10,6 +10,7 @@ const CLIENT_ENTRIES = [
   "mod.ts",
   "signin_card.tsx",
   "homes_panel.tsx",
+  "notifications_card.tsx",
 ] as const;
 
 export async function buildJs(
