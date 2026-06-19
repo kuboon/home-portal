@@ -138,6 +138,7 @@ export const AgentsPanel = clientEntry(
                   value={newName}
                   mix={[on<HTMLInputElement>("input", (e) => {
                     newName = (e.target as HTMLInputElement).value;
+                    handle.update();
                   })]}
                 />
                 <button
