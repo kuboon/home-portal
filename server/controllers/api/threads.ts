@@ -22,6 +22,7 @@ import {
   toggleReaction,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
+import { notifyNewMessage } from "../../notify.ts";
 import { signalThread, watchThread } from "../../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentStamps, pushRecentStamp } from "../../stamps.ts";
@@ -107,6 +108,11 @@ export const threadsController = {
           body: body.body ?? "",
         });
         await signalThread(threadId);
+        await notifyNewMessage({
+          threadId,
+          authorId: userId,
+          body: message.body,
+        });
         return Response.json({ message }, { status: 201 });
       } catch (error) {
         return handleError(error);
@@ -151,6 +157,11 @@ export const threadsController = {
           body: body.body,
         });
         await signalThread(threadId);
+        await notifyNewMessage({
+          threadId,
+          authorId: userId,
+          body: message.body,
+        });
         return Response.json({ message }, { status: 201 });
       } catch (error) {
         return handleError(error);

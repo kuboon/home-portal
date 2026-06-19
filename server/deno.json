@@ -13,6 +13,7 @@
   "imports": {
     "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1",
     "@std/assert": "jsr:@std/assert@^1.0.19",
+    "jose": "jsr:@panva/jose@^6.2.3",
     "@remix-run/ui": "npm:@remix-run/ui@^0.1.1",
     "@remix-run/cors-middleware": "npm:@remix-run/cors-middleware@0.1.2",
     "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.18.2",
@@ -24,7 +25,12 @@
   },
   "permissions": {
     "default": {
-      "env": ["IDP_ORIGIN", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"],
+      "env": [
+        "IDP_ORIGIN",
+        "RP_ORIGIN",
+        "TURSO_DATABASE_URL",
+        "TURSO_AUTH_TOKEN"
+      ],
       "net": true,
       "read": ["./bundled", "../packages/db/migrations"]
     }
