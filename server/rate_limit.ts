@@ -8,6 +8,8 @@
  * cheap and fans out across Deno Deploy isolates.
  */
 
+import { getKv } from "./kv.ts";
+
 /**
  * Consume one unit against a fixed window. Returns false when over limit.
  *
@@ -38,14 +40,9 @@ export async function allow(
   return false; // too contended to safely admit — treat as limited
 }
 
-let kvPromise: Promise<Deno.Kv> | undefined;
-function sharedKv(): Promise<Deno.Kv> {
-  return kvPromise ??= Deno.openKv();
-}
-
 /** True if the user may post now (1/sec AND 20/min). */
 export async function checkPostLimit(userId: string): Promise<boolean> {
-  const kv = await sharedKv();
+  const kv = await getKv();
   // Check the per-second window first: a burst is rejected here without
   // draining the per-minute budget, which only ~1/sec posts should consume.
   if (!(await allow(kv, ["rl", "post-sec", userId], 1, 1_000))) return false;
@@ -54,6 +51,6 @@ export async function checkPostLimit(userId: string): Promise<boolean> {
 
 /** True if the user may repost now (5/min, separate from post limits). */
 export async function checkRepostLimit(userId: string): Promise<boolean> {
-  const kv = await sharedKv();
+  const kv = await getKv();
   return await allow(kv, ["rl", "repost-min", userId], 5, 60_000);
 }
