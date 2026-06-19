@@ -41,6 +41,10 @@ client / server を分離した Deno workspaces。
 ## 環境変数
 
 - `IDP_ORIGIN` — IdP の origin（既定 `https://id.kbn.one`）
+- `RP_ORIGIN` — home portal 自身の origin（既定 `https://home.kbn.one`）。push
+  の client assertion の `iss`/`sub` 兼 JWKS 発行元。IdP の
+  `AUTHORIZE_WHITELIST` に登録が必要。RP 署名鍵は Deno KV に初回自動生成し
+  `/.well-known/jwks.json` で公開。
 - `TURSO_DATABASE_URL` — libSQL エンドポイント。ローカルは `turso dev`
   （`http://127.0.0.1:8080`）
 - `TURSO_AUTH_TOKEN` — 本番の認証トークン（ローカル `turso dev` では不要）
@@ -75,6 +79,8 @@ deno task check     # deno check + lint + fmt --check
 **スレッドアーカイブ**（7日無投稿で自動・読み取り専用）+ **CSS テーマ**（home
 admin のカスタム CSS、url()/@import 等のネットワーク取得は無効化）+
 **スタンプ**（メッセージへのリアクション、1投稿5個 まで、LRU 履歴）+ **Web Push
-購読** （id.kbn.one の push API に委譲。`/sw.js` +
-端末登録/テスト通知）まで実装済み。後続で 新着の自動通知配信（IdP
-のサーバ間送信口が必要）+ エージェント・MCP を積み上げる。
+通知**（購読は id.kbn.one の push API に委譲＝`/sw.js` +
+端末登録/テスト通知。新着は home portal サーバが `private_key_jwt` で
+`POST /rp/notifications` を叩き、参加者へ
+スレッド×ユーザーの指数バックオフ付きで配信）まで実装済み。後続で
+エージェント・MCP を積み上げる。

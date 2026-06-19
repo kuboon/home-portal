@@ -6,6 +6,8 @@ export const routes = route({
   signin: get("/signin"),
   homes: get("/homes"),
   notifications: get("/notifications"),
+  /** Public JWKS so the IdP can verify our RP client assertions. */
+  jwks: get("/.well-known/jwks.json"),
   api: route("api", {
     /** DPoP-protected: returns the current session info. */
     me: get("/me"),
