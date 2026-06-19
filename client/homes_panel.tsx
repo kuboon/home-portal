@@ -611,6 +611,7 @@ export const HomesPanel = clientEntry(
                   value={newHomeName}
                   mix={[on<HTMLInputElement>("input", (e) => {
                     newHomeName = (e.target as HTMLInputElement).value;
+                    handle.update();
                   })]}
                 />
                 <button
@@ -652,6 +653,7 @@ export const HomesPanel = clientEntry(
                   value={joinCode}
                   mix={[on<HTMLInputElement>("input", (e) => {
                     joinCode = (e.target as HTMLInputElement).value;
+                    handle.update();
                   })]}
                 />
                 <button
@@ -680,6 +682,7 @@ export const HomesPanel = clientEntry(
                             value={addUserId}
                             mix={[on<HTMLInputElement>("input", (e) => {
                               addUserId = (e.target as HTMLInputElement).value;
+                              handle.update();
                             })]}
                           />
                           <button
@@ -753,6 +756,7 @@ export const HomesPanel = clientEntry(
                           mix={[on<HTMLTextAreaElement>("input", (e) => {
                             themeDraft =
                               (e.target as HTMLTextAreaElement).value;
+                            handle.update();
                           })]}
                         >
                         </textarea>
@@ -780,6 +784,7 @@ export const HomesPanel = clientEntry(
                         value={newThreadTitle}
                         mix={[on<HTMLInputElement>("input", (e) => {
                           newThreadTitle = (e.target as HTMLInputElement).value;
+                          handle.update();
                         })]}
                       />
                       <button
@@ -849,6 +854,7 @@ export const HomesPanel = clientEntry(
                                 mix={[on<HTMLInputElement>("input", (e) => {
                                   newMessage =
                                     (e.target as HTMLInputElement).value;
+                                  handle.update();
                                 })]}
                               />
                               <button
