@@ -171,6 +171,13 @@ export const tools: McpTool[] = [
       const threadId = str(args, "threadId");
       const homeId = await homeIdOfThread(threadId);
       await requireMember(homeId, agentId);
+      // Must be able to see the source message — a member of its home — so an
+      // agent can't lift content out of a home it doesn't belong to (parity
+      // with the web /api repost endpoint).
+      const sourceMessageId = str(args, "sourceMessageId");
+      const src = await getMessageContext(sourceMessageId);
+      if (!src) throw new ToolError("source message not found");
+      await requireMember(src.homeId, agentId);
       if (!(await checkRepostLimit(agentId))) {
         throw new ToolError("rate limited");
       }
@@ -178,7 +185,7 @@ export const tools: McpTool[] = [
         const message = await repostMessage({
           threadId,
           authorId: agentId,
-          sourceMessageId: str(args, "sourceMessageId"),
+          sourceMessageId,
           body: optStr(args, "body"),
         });
         await signalThread(threadId);

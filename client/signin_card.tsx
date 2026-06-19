@@ -45,15 +45,17 @@ export const SignInCard = clientEntry(
     };
 
     // Record the signed-in IdP user into home portal's own DB (Turso),
-    // binding the userId to this DPoP session. Best-effort: a failure here
-    // does not block showing the signed-in state.
-    const syncUser = async (userId: string) => {
-      if (!fetchDpop) return;
+    // binding the userId to this DPoP session. We forward the IdP's signed,
+    // DPoP-bound token (`jws`) so the server verifies the identity instead of
+    // trusting a self-reported userId. Best-effort: a failure here does not
+    // block showing the signed-in state.
+    const syncUser = async (jws: string | undefined) => {
+      if (!fetchDpop || !jws) return;
       try {
         await fetchDpop("/api/users/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId }),
+          body: JSON.stringify({ jws }),
         });
       } catch (error) {
         console.warn("[signin] user sync failed", error);
@@ -69,13 +71,16 @@ export const SignInCard = clientEntry(
 
           const response = await fetchDpop(`${handle.props.idpOrigin}/session`);
           const session = response.ok
-            ? (await response.json()) as { userId: string | null }
+            ? (await response.json()) as {
+              userId: string | null;
+              jws?: string;
+            }
             : null;
           if (session?.userId) {
             signedIn = true;
             userInfo = `サインイン中: ${session.userId}`;
             setStatus("セッションを取得しました。", "success");
-            await syncUser(session.userId);
+            await syncUser(session.jws);
           } else {
             userInfo = "サインインしていません。";
             setStatus("");

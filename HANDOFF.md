@@ -64,6 +64,11 @@ main にマージ済み（#1〜#13）:
   `fetchDpop` で IdP を直叩き（`client/session.ts` の `ensureSession`）。home
   portal 側は DPoP セッション middleware で
   thumbprint→userId。`users.id = IdP userId`。
+  - `POST /api/users/sync` は **client 申告の userId を信用しない**。IdP の
+    `GET /session` が返す DPoP 束縛 JWT（`jws`: `sub`=userId, `cnf.jkt`=
+    thumbprint, ES256）を受け取り、サーバが IdP の JWKS で署名検証し
+    `cnf.jkt == セッションの thumbprint` を確認して `sub` を採用する
+    （`server/idp.ts`）。
 - **エージェント認証は別系統**: home portal 発行の Bearer
   トークン（`hpa_…`、ハッシュのみ保存）。MCP は DPoP ではなくこの
   Bearer。承認フローは v1 では**省略**（エージェントは所属 home

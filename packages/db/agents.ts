@@ -18,6 +18,9 @@ export interface Agent {
   createdAt: string;
 }
 
+/** Max agents a single human may own. */
+export const MAX_AGENTS_PER_OWNER = 20;
+
 async function sha256hex(input: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -42,6 +45,13 @@ export async function createAgent(
 ): Promise<{ agent: Agent; token: string }> {
   const displayName = input.displayName.trim();
   if (!displayName) throw new HomeError("displayName is required");
+
+  if ((await listAgentsByOwner(input.ownerId)).length >= MAX_AGENTS_PER_OWNER) {
+    throw new HomeError(
+      `エージェントは1人につき${MAX_AGENTS_PER_OWNER}個までです`,
+      409,
+    );
+  }
 
   const id = `agent_${monotonicUlid()}`;
   await upsertUser({ id, displayName, isAgent: true });
@@ -85,14 +95,34 @@ export async function getAgentIdByToken(token: string): Promise<string | null> {
   return rows[0] ? String(rows[0].agent_id) : null;
 }
 
-/** Revoke an agent (owner only). Returns whether a row was removed. */
+/**
+ * Revoke an agent (owner only): drop its token and remove it from every home
+ * so it can neither authenticate nor linger as a member. The `users` row is
+ * kept so its past messages keep their author. Returns whether anything was
+ * revoked.
+ */
 export async function deleteAgent(
   ownerId: string,
   agentId: string,
 ): Promise<boolean> {
-  const result = await (await db()).execute({
-    sql: "DELETE FROM agents WHERE agent_id = ? AND owner_id = ?",
+  const client = await db();
+  // Only the owner may revoke; check first so we don't strip memberships off
+  // an agent we don't own.
+  const { rows } = await client.execute({
+    sql: "SELECT 1 FROM agents WHERE agent_id = ? AND owner_id = ?",
     args: [agentId, ownerId],
   });
-  return result.rowsAffected > 0;
+  if (rows.length === 0) return false;
+
+  await client.batch([
+    {
+      sql: "DELETE FROM agents WHERE agent_id = ? AND owner_id = ?",
+      args: [agentId, ownerId],
+    },
+    {
+      sql: "DELETE FROM memberships WHERE user_id = ?",
+      args: [agentId],
+    },
+  ], "write");
+  return true;
 }
