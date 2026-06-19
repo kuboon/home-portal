@@ -8,6 +8,7 @@
  */
 
 import { getHome, getThread, getUser, listMembers } from "@scope/db";
+import { getKv as kv } from "./kv.ts";
 import { RP_ORIGIN, sendToUsers } from "./push_send.ts";
 
 const BASE_MS = 60_000;
@@ -38,9 +39,6 @@ export function nextBackoff(
     : Math.min(state.intervalMs * 2, CAP_MS);
   return { send: true, next: { lastSentAt: now, intervalMs } };
 }
-
-let kvPromise: Promise<Deno.Kv> | undefined;
-const kv = (): Promise<Deno.Kv> => (kvPromise ??= Deno.openKv());
 
 async function passesBackoff(
   threadId: string,

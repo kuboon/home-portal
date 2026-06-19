@@ -10,6 +10,8 @@
 
 import { calculateJwkThumbprint } from "jose";
 
+import { getKv as kv, setKvForTest as setSharedKv } from "./kv.ts";
+
 const algo = { name: "ECDSA", namedCurve: "P-256" } as const;
 
 interface StoredJwkPair {
@@ -32,14 +34,14 @@ export interface RpKey {
   readonly publicJwk: PublicJwk;
 }
 
-let kvPromise: Promise<Deno.Kv> | undefined;
-const kv = (): Promise<Deno.Kv> => (kvPromise ??= Deno.openKv());
-
 let rpKeyPromise: Promise<RpKey> | undefined;
 
-/** Override the KV instance (tests use an in-memory one). */
+/**
+ * Override the KV instance (tests use an in-memory one). Also drops the
+ * cached key derived from the previous store.
+ */
 export function setKvForTest(instance: Deno.Kv): void {
-  kvPromise = Promise.resolve(instance);
+  setSharedKv(instance);
   rpKeyPromise = undefined;
 }
 

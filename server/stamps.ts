@@ -5,17 +5,9 @@
  * first, so the UI can surface quick picks.
  */
 
+import { getKv as kv } from "./kv.ts";
+
 export const MAX_RECENT = 8;
-
-let kvPromise: Promise<Deno.Kv> | undefined;
-function kv(): Promise<Deno.Kv> {
-  return kvPromise ??= Deno.openKv();
-}
-
-/** Override the KV instance (tests use an in-memory one). */
-export function setKvForTest(instance: Deno.Kv): void {
-  kvPromise = Promise.resolve(instance);
-}
 
 const key = (userId: string) => ["stamp-recent", userId];
 

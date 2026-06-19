@@ -7,17 +7,11 @@
  * The token just maps to a home id; accepting it adds the caller as a member.
  */
 
+import { getKv as kv } from "./kv.ts";
+
+export { setKvForTest } from "./kv.ts";
+
 export const INVITE_TTL_MS = 60_000;
-
-let kvPromise: Promise<Deno.Kv> | undefined;
-function kv(): Promise<Deno.Kv> {
-  return kvPromise ??= Deno.openKv();
-}
-
-/** Override the KV instance (tests use an in-memory one). */
-export function setKvForTest(instance: Deno.Kv): void {
-  kvPromise = Promise.resolve(instance);
-}
 
 const key = (token: string) => ["invite", token];
 
