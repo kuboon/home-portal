@@ -22,39 +22,9 @@ export const signinAction = {
       <main class="mx-auto w-full max-w-3xl p-8 space-y-6">
         <meta name="idp-origin" content={idpOrigin} />
         <h1 class="text-3xl font-bold">パスキーでサインイン</h1>
-        <p>
-          認証は外部 IdP (<code>{idpOrigin}</code>){" "}
-          に委譲します。ブラウザで DPoP 鍵を生成し、その thumbprint を IdP に
-          bind してもらうことで Cookie レスにセッションを共有します。サインイン
-          が確立すると、あなたの userId が home portal の Turso{" "}
-          <code>users</code> に登録されます。
-        </p>
+        <p>パスキーで安全にサインインします。</p>
 
         <SignInCard idpOrigin={idpOrigin} />
-
-        <div class="card card-border bg-base-100">
-          <div class="card-body">
-            <h2 class="card-title">仕組み</h2>
-            <ol class="list-decimal pl-6 space-y-1">
-              <li>
-                このページが DPoP <code>thumbprint</code> を計算
-              </li>
-              <li>
-                「サインイン」で <code>{idpOrigin}/authorize</code>{" "}
-                へ遷移し IdP がパスキー認証
-              </li>
-              <li>
-                IdP が thumbprint に userId を bind → 戻って{" "}
-                <code>{idpOrigin}/session</code> が userId を返す
-              </li>
-              <li>
-                home portal の <code>POST /api/users/sync</code> (DPoP 保護)
-                {" "}
-                が Turso にユーザーを upsert
-              </li>
-            </ol>
-          </div>
-        </div>
       </main>,
     );
   },

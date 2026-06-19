@@ -141,9 +141,6 @@ export const SignInCard = clientEntry(
               <span>{status}</span>
             </div>
             <p class="mt-2">{userInfo}</p>
-            <p>
-              このブラウザの DPoP thumbprint: <code>{thumbprint}</code>
-            </p>
             <div class="card-actions mt-2">
               {ready && !signedIn
                 ? (
