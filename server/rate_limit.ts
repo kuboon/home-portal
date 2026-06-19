@@ -8,7 +8,14 @@
  * cheap and fans out across Deno Deploy isolates.
  */
 
-/** Consume one unit against a fixed window. Returns false when over limit. */
+/**
+ * Consume one unit against a fixed window. Returns false when over limit.
+ *
+ * Uses a compare-and-set loop so two concurrent requests can't both read the
+ * same count and slip past the limit (a plain read-then-write would race, and
+ * Deno Deploy runs many isolates against the same KV). On heavy contention it
+ * fails closed.
+ */
 export async function allow(
   kv: Deno.Kv,
   parts: Deno.KvKeyPart[],
@@ -18,10 +25,17 @@ export async function allow(
 ): Promise<boolean> {
   const bucket = Math.floor(now / windowMs);
   const key = [...parts, bucket];
-  const current = (await kv.get<number>(key)).value ?? 0;
-  if (current >= limit) return false;
-  await kv.set(key, current + 1, { expireIn: windowMs * 2 });
-  return true;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const entry = await kv.get<number>(key);
+    const current = entry.value ?? 0;
+    if (current >= limit) return false;
+    const res = await kv.atomic()
+      .check(entry) // only commit if the bucket hasn't changed under us
+      .set(key, current + 1, { expireIn: windowMs * 2 })
+      .commit();
+    if (res.ok) return true;
+  }
+  return false; // too contended to safely admit — treat as limited
 }
 
 let kvPromise: Promise<Deno.Kv> | undefined;
@@ -32,8 +46,10 @@ function sharedKv(): Promise<Deno.Kv> {
 /** True if the user may post now (1/sec AND 20/min). */
 export async function checkPostLimit(userId: string): Promise<boolean> {
   const kv = await sharedKv();
-  if (!(await allow(kv, ["rl", "post-min", userId], 20, 60_000))) return false;
-  return await allow(kv, ["rl", "post-sec", userId], 1, 1_000);
+  // Check the per-second window first: a burst is rejected here without
+  // draining the per-minute budget, which only ~1/sec posts should consume.
+  if (!(await allow(kv, ["rl", "post-sec", userId], 1, 1_000))) return false;
+  return await allow(kv, ["rl", "post-min", userId], 20, 60_000);
 }
 
 /** True if the user may repost now (5/min, separate from post limits). */

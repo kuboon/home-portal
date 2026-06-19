@@ -87,12 +87,38 @@ export interface ReplayDetector {
   check(jti: string): boolean | Promise<boolean>;
 }
 
+/**
+ * In-memory replay detector keyed by `jti`, with TTL eviction so the set can't
+ * grow without bound: a `jti` only needs to be remembered while a proof
+ * bearing it could still pass the freshness check (`maxAge + clockSkew`);
+ * after that the proof is rejected on age alone.
+ *
+ * Note: state is per-process, so on a multi-isolate platform (e.g. Deno
+ * Deploy) replay protection is best-effort per isolate. Pass a shared
+ * (KV/Redis-backed) {@link ReplayDetector} for cross-isolate guarantees.
+ */
 export class InMemoryReplayDetector implements ReplayDetector {
-  private seen = new Set<string>();
+  private readonly seen = new Map<string, number>(); // jti -> expiry (epoch ms)
+  private lastPrune = 0;
+
+  /** @param ttlMs How long a `jti` is remembered. Defaults to 6 minutes. */
+  constructor(private readonly ttlMs = 360_000) {}
+
   check(jti: string): boolean {
+    const now = Date.now();
+    this.prune(now);
     if (this.seen.has(jti)) return false;
-    this.seen.add(jti);
+    this.seen.set(jti, now + this.ttlMs);
     return true;
+  }
+
+  /** Drop expired entries, at most once per second to keep `check` cheap. */
+  private prune(now: number): void {
+    if (now - this.lastPrune < 1_000) return;
+    this.lastPrune = now;
+    for (const [jti, expiry] of this.seen) {
+      if (expiry <= now) this.seen.delete(jti);
+    }
   }
 }
 
@@ -136,9 +162,10 @@ export function dpopSession(
   // deno-lint-ignore no-explicit-any
 ): Middleware<any, any, SetDpopSessionContextTransform> {
   const { sessionStorage } = options;
-  const replayDetector = options.replayDetector ?? new InMemoryReplayDetector();
   const maxAgeSeconds = options.maxAgeSeconds ?? 300;
   const clockSkewSeconds = options.clockSkewSeconds ?? 60;
+  const replayDetector = options.replayDetector ??
+    new InMemoryReplayDetector((maxAgeSeconds + clockSkewSeconds) * 1000);
   const onError = options.onError ?? defaultOnError;
 
   const verifyOptions: VerifyDpopProofOptions = {

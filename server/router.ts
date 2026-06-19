@@ -6,7 +6,7 @@
  * (static files) and maps routes to controllers. Run with `deno serve`.
  */
 
-import { createRouter } from "@remix-run/fetch-router";
+import { createRouter, type Middleware } from "@remix-run/fetch-router";
 import { staticFiles } from "@remix-run/static-middleware";
 
 import { agentsController } from "./controllers/api/agents.ts";
@@ -24,8 +24,42 @@ import { signinAction } from "./controllers/signin.tsx";
 import { welcomeAction } from "./controllers/welcome.tsx";
 import { routes } from "./routes.ts";
 
+// The IdP origin must be reachable for the browser's DPoP `fetch` (sign-in,
+// session, logout); everything else is same-origin.
+const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+
+// Content-Security-Policy is the defence-in-depth partner the theme sanitizer
+// (server/theme.ts) relies on: even if a crafted theme slipped past, `url()`
+// fetches and inline scripts have nowhere to go. `style-src 'unsafe-inline'`
+// is required because home themes are injected as an inline <style>.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  `connect-src 'self' ${IDP_ORIGIN}`,
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "form-action 'self'",
+].join("; ");
+
+/** Add baseline security headers to every response. */
+const securityHeaders: Middleware = async (_context, next) => {
+  const response = await next();
+  const headers = response.headers;
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set("Content-Security-Policy", CONTENT_SECURITY_POLICY);
+  }
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "DENY");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return response;
+};
+
 const router = createRouter({
   middleware: [
+    securityHeaders,
     staticFiles(new URL("./bundled", import.meta.url).pathname),
   ],
 });

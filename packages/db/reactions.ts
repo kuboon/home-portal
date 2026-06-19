@@ -17,18 +17,6 @@ export interface ReactionSummary {
   mine: boolean;
 }
 
-async function userStampCount(
-  messageId: string,
-  userId: string,
-): Promise<number> {
-  const { rows } = await (await db()).execute({
-    sql:
-      "SELECT COUNT(*) AS n FROM reactions WHERE message_id = ? AND user_id = ?",
-    args: [messageId, userId],
-  });
-  return Number(rows[0].n);
-}
-
 /**
  * Toggle a stamp for a user on a message. Returns whether it is now present.
  * Adding is capped at {@link MAX_STAMPS_PER_MESSAGE} distinct stamps per user.
@@ -57,15 +45,19 @@ export async function toggleReaction(
     return { added: false };
   }
 
-  if (await userStampCount(messageId, userId) >= MAX_STAMPS_PER_MESSAGE) {
+  // Enforce the per-user cap in the INSERT itself so two concurrent adds
+  // can't both slip past a separate count check.
+  const inserted = await client.execute({
+    sql: "INSERT INTO reactions (message_id, user_id, stamp) " +
+      "SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM reactions " +
+      "WHERE message_id = ? AND user_id = ?) < ?",
+    args: [messageId, userId, s, messageId, userId, MAX_STAMPS_PER_MESSAGE],
+  });
+  if (inserted.rowsAffected === 0) {
     throw new HomeError(
       `リアクションは1投稿につき${MAX_STAMPS_PER_MESSAGE}個までです`,
     );
   }
-  await client.execute({
-    sql: "INSERT INTO reactions (message_id, user_id, stamp) VALUES (?, ?, ?)",
-    args: [messageId, userId, s],
-  });
   return { added: true };
 }
 
