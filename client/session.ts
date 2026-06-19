@@ -27,18 +27,25 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
   const { fetchDpop, thumbprint } = await init();
 
   let userId: string | null = null;
+  let jws: string | null = null;
   const response = await fetchDpop(`${idpOrigin}/session`);
   if (response.ok) {
-    const data = await response.json() as { userId: string | null };
+    const data = await response.json() as {
+      userId: string | null;
+      jws?: string;
+    };
     userId = data.userId ?? null;
+    jws = data.jws ?? null;
   }
 
-  if (userId) {
-    // Bind the IdP identity to this DPoP session + ensure the users row.
+  if (userId && jws) {
+    // Bind the IdP identity to this DPoP session + ensure the users row. We
+    // forward the IdP's signed, DPoP-bound token; the server verifies it
+    // rather than trusting a self-reported userId.
     await fetchDpop("/api/users/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ jws }),
     }).catch(() => {});
   }
 
