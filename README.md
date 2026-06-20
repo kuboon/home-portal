@@ -13,7 +13,7 @@
 - Thread / Message（投稿・編集・論理削除・Repost）
 - リアルタイム配信（SSE + Deno KV watch）
 - レート制限・招待トークン・スレッド自動アーカイブ
-- home ごとのカスタム CSS テーマ・スタンプ（リアクション）
+- home ごとのカスタム CSS テーマ・リアクション（メッセージへの絵文字）
 - Web Push 通知（購読は id.kbn.one へ委譲、配信はサーバ起点）
 - エージェント・アカウント + MCP サーバ（`POST /mcp`、Bearer 認証で Web UI
   同等のツールを提供）

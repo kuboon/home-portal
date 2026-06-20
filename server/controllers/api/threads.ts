@@ -25,7 +25,7 @@ import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { notifyNewMessage } from "../../notify.ts";
 import { signalThread, watchThread } from "../../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
-import { getRecentStamps, pushRecentStamp } from "../../stamps.ts";
+import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
 import type { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -274,13 +274,13 @@ export const threadsController = {
           status: 409,
         });
       }
-      const body = await context.request.json() as { stamp?: string };
-      if (!body.stamp) {
-        return Response.json({ error: "stamp is required" }, { status: 400 });
+      const body = await context.request.json() as { emoji?: string };
+      if (!body.emoji) {
+        return Response.json({ error: "emoji is required" }, { status: 400 });
       }
       try {
-        const result = await toggleReaction(messageId, userId, body.stamp);
-        if (result.added) await pushRecentStamp(userId, body.stamp);
+        const result = await toggleReaction(messageId, userId, body.emoji);
+        if (result.added) await pushRecentEmoji(userId, body.emoji);
         await signalThread(ctx.threadId);
         return Response.json(result);
       } catch (error) {
@@ -288,10 +288,10 @@ export const threadsController = {
       }
     },
 
-    async recentStamps(context) {
+    async recentEmojis(context) {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
-      return Response.json({ stamps: await getRecentStamps(userId) });
+      return Response.json({ emojis: await getRecentEmojis(userId) });
     },
   },
 } satisfies Controller<typeof routes.threadsApi>;

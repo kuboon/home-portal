@@ -48,10 +48,10 @@ interface Message {
   editedAt: string | null;
   deleted: boolean;
   repost: { authorName: string; body: string; deleted: boolean } | null;
-  reactions: { stamp: string; count: number; mine: boolean }[];
+  reactions: { emoji: string; count: number; mine: boolean }[];
 }
 
-const DEFAULT_STAMPS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
+const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
 
 export const HomesPanel = clientEntry(
   "/homes_panel.js#HomesPanel",
@@ -75,7 +75,7 @@ export const HomesPanel = clientEntry(
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
     let joinCode = "";
     let themeDraft = "";
-    let recentStamps: string[] = [];
+    let recentEmojis: string[] = [];
     let paletteFor: string | null = null;
 
     /** Inject the selected home's custom CSS into a dedicated <style>. */
@@ -179,21 +179,21 @@ export const HomesPanel = clientEntry(
       })().catch(() => {});
     };
 
-    const loadRecentStamps = async () => {
-      const data = await api("/api/stamps/recent") as { stamps: string[] };
-      recentStamps = data.stamps;
+    const loadRecentEmojis = async () => {
+      const data = await api("/api/reactions/recent") as { emojis: string[] };
+      recentEmojis = data.emojis;
     };
 
-    const onToggleReaction = (messageId: string, stamp: string) =>
+    const onToggleReaction = (messageId: string, emoji: string) =>
       run(async () => {
         paletteFor = null;
         await api(`/api/messages/${messageId}/reactions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stamp }),
+          body: JSON.stringify({ emoji }),
         });
         if (selectedThreadId) await loadMessages(selectedThreadId);
-        await loadRecentStamps();
+        await loadRecentEmojis();
       });
 
     const run = async (fn: () => Promise<void>) => {
@@ -396,7 +396,7 @@ export const HomesPanel = clientEntry(
           userId = session.userId;
           if (userId) {
             await loadHomes();
-            await loadRecentStamps();
+            await loadRecentEmojis();
           }
         } catch (e) {
           error = (e as Error).message;
@@ -540,7 +540,7 @@ export const HomesPanel = clientEntry(
                   handle.update();
                 })]}
               >
-                ＋スタンプ
+                ＋リアクション
               </button>
             )}
           </div>
@@ -552,21 +552,21 @@ export const HomesPanel = clientEntry(
                     type="button"
                     class={`badge ${r.mine ? "badge-primary" : "badge-ghost"}`}
                     disabled={selectedArchived()}
-                    mix={[on("click", () => onToggleReaction(m.id, r.stamp))]}
+                    mix={[on("click", () => onToggleReaction(m.id, r.emoji))]}
                   >
-                    {r.stamp} {r.count}
+                    {r.emoji} {r.count}
                   </button>
                 ))}
                 {paletteFor === m.id
-                  ? [...new Set([...recentStamps, ...DEFAULT_STAMPS])].map((
-                    s,
+                  ? [...new Set([...recentEmojis, ...DEFAULT_EMOJIS])].map((
+                    e,
                   ) => (
                     <button
                       type="button"
                       class="btn btn-xs"
-                      mix={[on("click", () => onToggleReaction(m.id, s))]}
+                      mix={[on("click", () => onToggleReaction(m.id, e))]}
                     >
-                      {s}
+                      {e}
                     </button>
                   ))
                   : null}

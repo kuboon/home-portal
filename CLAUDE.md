@@ -78,7 +78,7 @@ deno task check     # deno check + lint + fmt --check
 **招待トークン**（管理者画面表示中のみ有効・60秒無操作で失効、 コードで参加）+
 **スレッドアーカイブ**（7日無投稿で自動・読み取り専用）+ **CSS テーマ**（home
 admin のカスタム CSS、url()/@import 等のネットワーク取得は無効化）+
-**スタンプ**（メッセージへのリアクション、1投稿5個 まで、LRU 履歴）+ **Web Push
+**リアクション**（メッセージへの絵文字、1投稿5個 まで、LRU 履歴）+ **Web Push
 通知**（購読は id.kbn.one の push API に委譲＝`/sw.js` +
 端末登録/テスト通知。新着は home portal サーバが `private_key_jwt` で
 `POST /rp/notifications` を叩き、参加者へ

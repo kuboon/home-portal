@@ -202,11 +202,11 @@ export const tools: McpTool[] = [
   },
   {
     name: "react",
-    description: "Toggle a stamp (reaction) on a message.",
+    description: "Toggle an emoji reaction on a message.",
     inputSchema: {
       type: "object",
-      properties: { messageId: { type: "string" }, stamp: { type: "string" } },
-      required: ["messageId", "stamp"],
+      properties: { messageId: { type: "string" }, emoji: { type: "string" } },
+      required: ["messageId", "emoji"],
     },
     async handler(agentId, args) {
       const messageId = str(args, "messageId");
@@ -215,7 +215,7 @@ export const tools: McpTool[] = [
       await requireMember(ctx.homeId, agentId);
       await homeIdOfThread(ctx.threadId); // rejects archived threads
       try {
-        return await toggleReaction(messageId, agentId, str(args, "stamp"));
+        return await toggleReaction(messageId, agentId, str(args, "emoji"));
       } catch (error) {
         return wrap(error);
       }
