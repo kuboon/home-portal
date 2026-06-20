@@ -24,6 +24,8 @@ import { signinAction } from "./controllers/signin.tsx";
 import { welcomeAction } from "./controllers/welcome.tsx";
 import { routes } from "./routes.ts";
 
+Deno.env.set("DENO_KV_ACCESS_TOKEN", Deno.env.get("KV_ACCESS_TOKEN"));
+
 // The IdP origin must be reachable for the browser's DPoP `fetch` (sign-in,
 // session, logout); everything else is same-origin.
 const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
