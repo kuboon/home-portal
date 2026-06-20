@@ -138,6 +138,7 @@ export const tools: McpTool[] = [
       if (!(await checkPostLimit(agentId))) throw new ToolError("rate limited");
       try {
         const message = await postMessage({
+          homeId,
           threadId,
           authorId: agentId,
           body: str(args, "body"),
@@ -183,6 +184,7 @@ export const tools: McpTool[] = [
       }
       try {
         const message = await repostMessage({
+          homeId,
           threadId,
           authorId: agentId,
           sourceMessageId,
@@ -213,7 +215,8 @@ export const tools: McpTool[] = [
       const ctx = await getMessageContext(messageId);
       if (!ctx) throw new ToolError("message not found");
       await requireMember(ctx.homeId, agentId);
-      await homeIdOfThread(ctx.threadId); // rejects archived threads
+      // Reject archived threads; main-channel messages (no thread) never archive.
+      if (ctx.threadId) await homeIdOfThread(ctx.threadId);
       try {
         return await toggleReaction(messageId, agentId, str(args, "emoji"));
       } catch (error) {

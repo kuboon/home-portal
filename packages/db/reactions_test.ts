@@ -21,6 +21,7 @@ async function setup() {
     userId: "alice",
   });
   const msg = await postMessage({
+    homeId: home.id,
     threadId: thread.id,
     authorId: "alice",
     body: "hi",

@@ -11,6 +11,7 @@
 import { kv } from "@kuboon/kv/denoKv.ts";
 
 const threadSignalKey = (threadId: string) => ["thread-signal", threadId];
+const mainSignalKey = (homeId: string) => ["main-signal", homeId];
 
 /** Bump a thread's signal so watchers re-query for new messages. */
 export async function signalThread(threadId: string): Promise<void> {
@@ -22,4 +23,14 @@ export function watchThread(
   threadId: string,
 ): ReadableStream<unknown> {
   return kv.watch([threadSignalKey(threadId)]);
+}
+
+/** Bump a home's main-channel signal (posts with no thread). */
+export async function signalMainChannel(homeId: string): Promise<void> {
+  await kv.set(mainSignalKey(homeId), Date.now());
+}
+
+/** A stream that yields once per change to a home's main-channel signal. */
+export function watchMainChannel(homeId: string): ReadableStream<unknown> {
+  return kv.watch([mainSignalKey(homeId)]);
 }
