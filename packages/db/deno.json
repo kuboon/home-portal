@@ -9,6 +9,7 @@
   },
   "tasks": {
     "migrate": "deno run -P --env-file ../../.env migrate.ts",
+    "migrate:prod": "deno run -P migrate.ts",
     "check": "deno check; deno lint; deno test -P; deno fmt --check"
   },
   "imports": {

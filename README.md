@@ -47,14 +47,15 @@ deno task dev
 
 ## タスク
 
-| タスク              | 内容                                                          |
-| ------------------- | ------------------------------------------------------------- |
-| `deno task dev`     | client をバンドルし、server を `--watch` で起動               |
-| `deno task serve`   | バンドル + server を起動（本番相当）                          |
-| `deno task bundle`  | client JS と Tailwind/daisyUI CSS を `server/bundled/` に出力 |
-| `deno task migrate` | Turso にマイグレーションを適用                                |
-| `deno task test`    | ユニットテスト（DB テストは `:memory:` で実行）               |
-| `deno task check`   | `deno check` + `deno lint` + `deno fmt --check`               |
+| タスク                 | 内容                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `deno task dev`        | client をバンドルし、server を `--watch` で起動                             |
+| `deno task serve`      | バンドル + server を起動（本番相当）                                        |
+| `deno task bundle`     | client JS と Tailwind/daisyUI CSS を `server/bundled/` に出力               |
+| `deno task migrate`    | Turso にマイグレーションを適用（ローカル: `.env` を読む）                   |
+| `deno task pre-deploy` | デプロイ前フック。本番 Turso にマイグレーションを適用（env は環境変数から） |
+| `deno task test`       | ユニットテスト（DB テストは `:memory:` で実行）                             |
+| `deno task check`      | `deno check` + `deno lint` + `deno fmt --check`                             |
 
 ## デプロイ（Deno Deploy）
 
@@ -62,7 +63,9 @@ deno task dev
 - ビルドコマンド: `deno task bundle`（`server/bundled/` を生成）
 - 環境変数: `IDP_ORIGIN`, `RP_ORIGIN`（自身の origin。例
   `https://home.kbn.one`）, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
-- 事前に本番 Turso DB に対して `deno task migrate` を実行
+- デプロイ前フックで `deno task pre-deploy` を実行（本番 Turso
+  にマイグレーション を適用。冪等なので毎回実行して安全。`TURSO_DATABASE_URL` /
+  `TURSO_AUTH_TOKEN` は環境変数から読む）
 - サーバ起点 Web Push を使うには、`RP_ORIGIN` を IdP（id.kbn.one）の
   `AUTHORIZE_WHITELIST` に登録する（RP の client assertion 検証のため）
 
