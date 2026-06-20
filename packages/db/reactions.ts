@@ -63,18 +63,24 @@ export async function toggleReaction(
   return { added: true };
 }
 
-/** Aggregated reactions for every message in a thread, keyed by message id. */
+/** A conversation: a thread (`threadId`) or a home's main channel. */
+export type Channel = { homeId: string; threadId?: string | null };
+
+/** Aggregated reactions for every message in a channel, keyed by message id. */
 export async function reactionsByMessage(
-  threadId: string,
+  channel: Channel,
   viewerId: string,
 ): Promise<Map<string, ReactionSummary[]>> {
+  const scope = channel.threadId
+    ? { clause: "m.thread_id = ?", arg: channel.threadId }
+    : { clause: "m.home_id = ? AND m.thread_id IS NULL", arg: channel.homeId };
   const { rows } = await (await db()).execute({
     sql: "SELECT r.message_id, r.emoji, COUNT(*) AS count, " +
       "MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) AS mine " +
       "FROM reactions r JOIN messages m ON m.id = r.message_id " +
-      "WHERE m.thread_id = ? " +
+      `WHERE ${scope.clause} ` +
       "GROUP BY r.message_id, r.emoji ORDER BY count DESC, r.emoji",
-    args: [viewerId, threadId],
+    args: [viewerId, scope.arg],
   });
   const map = new Map<string, ReactionSummary[]>();
   for (const row of rows) {

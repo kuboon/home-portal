@@ -56,6 +56,14 @@ export const routes = route({
     list: get("/homes/:homeId/threads"),
     /** POST /api/homes/:homeId/threads — create a thread (members). */
     create: post("/homes/:homeId/threads"),
+    /** GET /api/homes/:homeId/messages — main-channel messages (members). */
+    mainMessages: get("/homes/:homeId/messages"),
+    /** POST /api/homes/:homeId/messages — post to the main channel (members). */
+    mainPost: post("/homes/:homeId/messages"),
+    /** POST /api/homes/:homeId/reposts — repost into the main channel. */
+    mainRepost: post("/homes/:homeId/reposts"),
+    /** GET /api/homes/:homeId/stream — main-channel SSE pings (members). */
+    mainStream: get("/homes/:homeId/stream"),
     /** GET /api/threads/:threadId/messages — messages in a thread (members). */
     messages: get("/threads/:threadId/messages"),
     /** POST /api/threads/:threadId/messages — post a message (members). */

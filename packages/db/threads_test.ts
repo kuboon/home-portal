@@ -12,6 +12,7 @@ import {
   createThread,
   deleteMessage,
   editMessage,
+  listMainMessages,
   listMessages,
   listThreads,
   postMessage,
@@ -45,13 +46,51 @@ Deno.test("threads and messages round-trip", async () => {
   const threads = await listThreads(home.id);
   assertEquals(threads.length, 1);
 
-  await postMessage({ threadId: thread.id, authorId: "alice", body: "やあ" });
-  await postMessage({ threadId: thread.id, authorId: "alice", body: "元気？" });
+  await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    body: "やあ",
+  });
+  await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    body: "元気？",
+  });
 
   const messages = await listMessages(thread.id);
   assertEquals(messages.length, 2);
   assertEquals(messages[0].body, "やあ");
   assertEquals(messages[0].authorName, "Alice");
+});
+
+Deno.test("main channel: posts with no thread are scoped to the home", async () => {
+  const home = await setup();
+  const other = await createHome({ name: "Other", userId: "alice" });
+
+  await postMessage({ homeId: home.id, authorId: "alice", body: "メイン1" });
+  await postMessage({ homeId: home.id, authorId: "alice", body: "メイン2" });
+  await postMessage({ homeId: other.id, authorId: "alice", body: "別ホーム" });
+
+  // A thread post must NOT show up in the main channel.
+  const thread = await createThread({
+    homeId: home.id,
+    title: "t",
+    userId: "alice",
+  });
+  await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    body: "スレッド投稿",
+  });
+
+  const main = await listMainMessages(home.id, "alice");
+  assertEquals(main.map((m) => m.body), ["メイン1", "メイン2"]);
+  assertEquals(main[0].threadId, null);
+  assertEquals(main[0].homeId, home.id);
+  assertEquals((await listMessages(thread.id)).length, 1);
 });
 
 Deno.test("edit updates body + marks edited; delete leaves a tombstone", async () => {
@@ -62,6 +101,7 @@ Deno.test("edit updates body + marks edited; delete leaves a tombstone", async (
     userId: "alice",
   });
   const posted = await postMessage({
+    homeId: home.id,
     threadId: thread.id,
     authorId: "alice",
     body: "やあ",
@@ -101,6 +141,7 @@ Deno.test("repost references the original and flattens repost-of-repost", async 
     userId: "alice",
   });
   const original = await postMessage({
+    homeId: home.id,
     threadId: t1.id,
     authorId: "alice",
     body: "元の投稿",
@@ -108,6 +149,7 @@ Deno.test("repost references the original and flattens repost-of-repost", async 
 
   // Repost into t2 with a comment.
   const repost = await repostMessage({
+    homeId: home.id,
     threadId: t2.id,
     authorId: "alice",
     sourceMessageId: original.id,
@@ -120,6 +162,7 @@ Deno.test("repost references the original and flattens repost-of-repost", async 
 
   // Repost the repost → flattens to the original, not the repost.
   const repost2 = await repostMessage({
+    homeId: home.id,
     threadId: t2.id,
     authorId: "alice",
     sourceMessageId: repost.id,
@@ -156,7 +199,12 @@ Deno.test("threads with no recent activity auto-archive and become read-only", a
 
   // Posting into an archived thread is rejected.
   await assertRejects(() =>
-    postMessage({ threadId: "old-thread", authorId: "alice", body: "x" })
+    postMessage({
+      homeId: home.id,
+      threadId: "old-thread",
+      authorId: "alice",
+      body: "x",
+    })
   );
 });
 
@@ -172,6 +220,11 @@ Deno.test("empty thread title and message body are rejected", async () => {
     userId: "alice",
   });
   await assertRejects(() =>
-    postMessage({ threadId: thread.id, authorId: "alice", body: "   " })
+    postMessage({
+      homeId: home.id,
+      threadId: thread.id,
+      authorId: "alice",
+      body: "   ",
+    })
   );
 });

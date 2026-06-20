@@ -9,7 +9,11 @@
 import { monotonicUlid } from "@std/ulid";
 import { db } from "./client.ts";
 import { HomeError } from "./homes.ts";
-import { reactionsByMessage, type ReactionSummary } from "./reactions.ts";
+import {
+  type Channel,
+  reactionsByMessage,
+  type ReactionSummary,
+} from "./reactions.ts";
 
 /** Max message length, in characters. */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -32,7 +36,9 @@ export interface RepostOf {
 
 export interface Message {
   id: string;
-  threadId: string;
+  homeId: string;
+  /** The thread this belongs to, or `null` for a home's main channel. */
+  threadId: string | null;
   authorId: string;
   authorName: string;
   body: string;
@@ -122,20 +128,26 @@ async function assertWritable(threadId: string): Promise<void> {
 }
 
 export async function postMessage(
-  input: { threadId: string; authorId: string; body: string },
+  input: {
+    homeId: string;
+    /** Omit (or `null`) to post to the home's main channel. */
+    threadId?: string | null;
+    authorId: string;
+    body: string;
+  },
 ): Promise<Message> {
   const body = input.body.trim();
   if (!body) throw new HomeError("message body is required");
   if (body.length > MAX_MESSAGE_LENGTH) {
     throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
   }
-  await assertWritable(input.threadId);
+  if (input.threadId) await assertWritable(input.threadId);
 
   const id = monotonicUlid();
   await (await db()).execute({
-    sql:
-      "INSERT INTO messages (id, thread_id, author_id, body) VALUES (?, ?, ?, ?)",
-    args: [id, input.threadId, input.authorId, body],
+    sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body) " +
+      "VALUES (?, ?, ?, ?, ?)",
+    args: [id, input.homeId, input.threadId ?? null, input.authorId, body],
   });
   const message = await getMessage(id);
   if (!message) throw new Error(`postMessage failed to read back ${id}`);
@@ -172,7 +184,8 @@ function rowToMessage(row: Record<string, unknown>): Message {
   }
   return {
     id: String(row.id),
-    threadId: String(row.thread_id),
+    homeId: String(row.home_id),
+    threadId: row.thread_id == null ? null : String(row.thread_id),
     authorId: String(row.author_id),
     authorName: String(row.display_name),
     // Deleted messages keep a tombstone (the row) but not their content.
@@ -187,21 +200,40 @@ function rowToMessage(row: Record<string, unknown>): Message {
 }
 
 /**
- * Messages in a thread, oldest first. Deleted ones remain as tombstones.
- * Reactions are attached for `viewerId` (so `mine` is correct).
+ * Messages in a channel (a thread, or a home's main channel), oldest first.
+ * Deleted ones remain as tombstones. Reactions are attached for `viewerId`.
  */
-export async function listMessages(
+async function listChannelMessages(
+  channel: Channel,
+  viewerId: string,
+): Promise<Message[]> {
+  const scope = channel.threadId
+    ? { clause: "m.thread_id = ?", arg: channel.threadId }
+    : { clause: "m.home_id = ? AND m.thread_id IS NULL", arg: channel.homeId };
+  const { rows } = await (await db()).execute({
+    sql: `${MESSAGE_SELECT} WHERE ${scope.clause} ORDER BY m.created_at`,
+    args: [scope.arg],
+  });
+  const messages = rows.map(rowToMessage);
+  const reactions = await reactionsByMessage(channel, viewerId);
+  for (const m of messages) m.reactions = reactions.get(m.id) ?? [];
+  return messages;
+}
+
+/** Messages in a thread, oldest first. */
+export function listMessages(
   threadId: string,
   viewerId = "",
 ): Promise<Message[]> {
-  const { rows } = await (await db()).execute({
-    sql: `${MESSAGE_SELECT} WHERE m.thread_id = ? ORDER BY m.created_at`,
-    args: [threadId],
-  });
-  const messages = rows.map(rowToMessage);
-  const reactions = await reactionsByMessage(threadId, viewerId);
-  for (const m of messages) m.reactions = reactions.get(m.id) ?? [];
-  return messages;
+  return listChannelMessages({ homeId: "", threadId }, viewerId);
+}
+
+/** Messages in a home's main channel (no thread), oldest first. */
+export function listMainMessages(
+  homeId: string,
+  viewerId = "",
+): Promise<Message[]> {
+  return listChannelMessages({ homeId, threadId: null }, viewerId);
 }
 
 /**
@@ -211,7 +243,9 @@ export async function listMessages(
  */
 export async function repostMessage(
   input: {
-    threadId: string;
+    homeId: string;
+    /** Omit (or `null`) to repost into the home's main channel. */
+    threadId?: string | null;
     authorId: string;
     sourceMessageId: string;
     body?: string;
@@ -219,7 +253,7 @@ export async function repostMessage(
 ): Promise<Message> {
   const source = await getMessage(input.sourceMessageId);
   if (!source) throw new HomeError("source message not found", 404);
-  await assertWritable(input.threadId);
+  if (input.threadId) await assertWritable(input.threadId);
   const original = source.repostOf ?? source.id;
 
   const id = monotonicUlid();
@@ -228,9 +262,17 @@ export async function repostMessage(
     throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
   }
   await (await db()).execute({
-    sql: "INSERT INTO messages (id, thread_id, author_id, body, repost_of) " +
-      "VALUES (?, ?, ?, ?, ?)",
-    args: [id, input.threadId, input.authorId, body, original],
+    sql:
+      "INSERT INTO messages (id, home_id, thread_id, author_id, body, repost_of) " +
+      "VALUES (?, ?, ?, ?, ?, ?)",
+    args: [
+      id,
+      input.homeId,
+      input.threadId ?? null,
+      input.authorId,
+      body,
+      original,
+    ],
   });
   const message = await getMessage(id);
   if (!message) throw new Error(`repostMessage failed to read back ${id}`);
@@ -240,16 +282,17 @@ export async function repostMessage(
 /** Minimal message info for authorization (who/where), or `null`. */
 export async function getMessageContext(
   messageId: string,
-): Promise<{ threadId: string; homeId: string; authorId: string } | null> {
+): Promise<
+  { threadId: string | null; homeId: string; authorId: string } | null
+> {
   const { rows } = await (await db()).execute({
-    sql: "SELECT m.thread_id, m.author_id, t.home_id FROM messages m " +
-      "JOIN threads t ON t.id = m.thread_id WHERE m.id = ?",
+    sql: "SELECT thread_id, home_id, author_id FROM messages WHERE id = ?",
     args: [messageId],
   });
   const row = rows[0];
   if (!row) return null;
   return {
-    threadId: String(row.thread_id),
+    threadId: row.thread_id == null ? null : String(row.thread_id),
     homeId: String(row.home_id),
     authorId: String(row.author_id),
   };
@@ -265,7 +308,7 @@ export async function editMessage(
     throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
   }
   const ctx = await getMessageContext(input.messageId);
-  if (ctx) await assertWritable(ctx.threadId);
+  if (ctx?.threadId) await assertWritable(ctx.threadId);
   const result = await (await db()).execute({
     sql: "UPDATE messages SET body = ?, edited_at = datetime('now') " +
       "WHERE id = ? AND author_id = ? AND deleted_at IS NULL",
@@ -282,7 +325,7 @@ export async function editMessage(
 /** Soft-delete a message: clear its body, leave a tombstone. Idempotent. */
 export async function deleteMessage(messageId: string): Promise<void> {
   const ctx = await getMessageContext(messageId);
-  if (ctx) await assertWritable(ctx.threadId);
+  if (ctx?.threadId) await assertWritable(ctx.threadId);
   await (await db()).execute({
     sql: "UPDATE messages SET deleted_at = datetime('now'), body = '' " +
       "WHERE id = ? AND deleted_at IS NULL",

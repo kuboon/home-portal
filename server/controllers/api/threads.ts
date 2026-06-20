@@ -15,6 +15,7 @@ import {
   getRole,
   getThread,
   HomeError,
+  listMainMessages,
   listMessages,
   listThreads,
   postMessage,
@@ -23,7 +24,12 @@ import {
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { notifyNewMessage } from "../../notify.ts";
-import { signalThread, watchThread } from "../../realtime.ts";
+import {
+  signalMainChannel,
+  signalThread,
+  watchMainChannel,
+  watchThread,
+} from "../../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
 import type { routes } from "../../routes.ts";
@@ -47,6 +53,58 @@ function handleError(error: unknown): Response {
     return Response.json({ error: error.message }, { status: error.status });
   }
   throw error;
+}
+
+/** Bump the right realtime signal for a message's channel (thread or main). */
+function signalChannel(ctx: { homeId: string; threadId: string | null }) {
+  return ctx.threadId
+    ? signalThread(ctx.threadId)
+    : signalMainChannel(ctx.homeId);
+}
+
+/**
+ * Wrap a KV watch stream as an SSE response. Emits a `ready` ping, then a
+ * `sync` ping on every change; the client re-fetches the channel's messages.
+ */
+function sseFromWatch(
+  request: Request,
+  watch: ReadableStream<unknown>,
+): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const ping = (event: string) =>
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
+      ping("ready");
+
+      const reader = watch.getReader();
+      const stop = () => {
+        reader.cancel().catch(() => {});
+        try {
+          controller.close();
+        } catch { /* already closed */ }
+      };
+      request.signal.addEventListener("abort", stop);
+
+      (async () => {
+        try {
+          while (true) {
+            const { done } = await reader.read();
+            if (done) break;
+            ping("sync");
+          }
+        } catch { /* client gone */ }
+      })();
+    },
+  });
+
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 export const threadsController = {
@@ -78,6 +136,82 @@ export const threadsController = {
       }
     },
 
+    async mainMessages(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { homeId } = context.params;
+      if (!(await getRole(homeId, userId))) return forbidden();
+      return Response.json({
+        messages: await listMainMessages(homeId, userId),
+      });
+    },
+
+    async mainPost(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { homeId } = context.params;
+      if (!(await getRole(homeId, userId))) return forbidden();
+      if (!(await checkPostLimit(userId))) return rateLimited();
+      const body = await context.request.json() as { body?: string };
+      try {
+        const message = await postMessage({
+          homeId,
+          authorId: userId,
+          body: body.body ?? "",
+        });
+        await signalMainChannel(homeId);
+        return Response.json({ message }, { status: 201 });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async mainRepost(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { homeId } = context.params;
+      if (!(await getRole(homeId, userId))) return forbidden();
+      const body = await context.request.json() as {
+        sourceMessageId?: string;
+        body?: string;
+      };
+      if (!body.sourceMessageId) {
+        return Response.json({ error: "sourceMessageId is required" }, {
+          status: 400,
+        });
+      }
+      const src = await getMessageContext(body.sourceMessageId);
+      if (!src) {
+        return Response.json({ error: "source not found" }, { status: 404 });
+      }
+      if (!(await getRole(src.homeId, userId))) {
+        return Response.json({ error: "cannot access source" }, {
+          status: 403,
+        });
+      }
+      if (!(await checkRepostLimit(userId))) return rateLimited();
+      try {
+        const message = await repostMessage({
+          homeId,
+          authorId: userId,
+          sourceMessageId: body.sourceMessageId,
+          body: body.body,
+        });
+        await signalMainChannel(homeId);
+        return Response.json({ message }, { status: 201 });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async mainStream(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { homeId } = context.params;
+      if (!(await getRole(homeId, userId))) return forbidden();
+      return sseFromWatch(context.request, watchMainChannel(homeId));
+    },
+
     async messages(context) {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
@@ -103,6 +237,7 @@ export const threadsController = {
       const body = await context.request.json() as { body?: string };
       try {
         const message = await postMessage({
+          homeId: thread.homeId,
           threadId,
           authorId: userId,
           body: body.body ?? "",
@@ -151,6 +286,7 @@ export const threadsController = {
       if (!(await checkRepostLimit(userId))) return rateLimited();
       try {
         const message = await repostMessage({
+          homeId: thread.homeId,
           threadId,
           authorId: userId,
           sourceMessageId: body.sourceMessageId,
@@ -177,46 +313,7 @@ export const threadsController = {
         return Response.json({ error: "not found" }, { status: 404 });
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
-
-      // The stream emits a lightweight `sync` ping on every change to the
-      // thread (post/edit/delete); the client re-fetches messages. This keeps
-      // edits and deletions in sync, not just appends.
-      const encoder = new TextEncoder();
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          const ping = (event: string) =>
-            controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
-
-          ping("ready");
-
-          const reader = watchThread(threadId).getReader();
-          const stop = () => {
-            reader.cancel().catch(() => {});
-            try {
-              controller.close();
-            } catch { /* already closed */ }
-          };
-          context.request.signal.addEventListener("abort", stop);
-
-          (async () => {
-            try {
-              while (true) {
-                const { done } = await reader.read();
-                if (done) break;
-                ping("sync");
-              }
-            } catch { /* client gone */ }
-          })();
-        },
-      });
-
-      return new Response(body, {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          "Connection": "keep-alive",
-        },
-      });
+      return sseFromWatch(context.request, watchThread(threadId));
     },
 
     async editMessage(context) {
@@ -235,7 +332,7 @@ export const threadsController = {
           authorId: userId,
           body: body.body ?? "",
         });
-        await signalThread(ctx.threadId);
+        await signalChannel(ctx);
         return Response.json({ message });
       } catch (error) {
         return handleError(error);
@@ -257,7 +354,7 @@ export const threadsController = {
         });
       }
       await deleteMessage(messageId);
-      await signalThread(ctx.threadId);
+      await signalChannel(ctx);
       return Response.json({ ok: true });
     },
 
@@ -268,7 +365,8 @@ export const threadsController = {
       const ctx = await getMessageContext(messageId);
       if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
       if (!(await getRole(ctx.homeId, userId))) return forbidden();
-      const thread = await getThread(ctx.threadId);
+      // Main-channel messages (no thread) never archive.
+      const thread = ctx.threadId ? await getThread(ctx.threadId) : null;
       if (thread?.archivedAt) {
         return Response.json({ error: "スレッドはアーカイブ済みです" }, {
           status: 409,
@@ -281,7 +379,7 @@ export const threadsController = {
       try {
         const result = await toggleReaction(messageId, userId, body.emoji);
         if (result.added) await pushRecentEmoji(userId, body.emoji);
-        await signalThread(ctx.threadId);
+        await signalChannel(ctx);
         return Response.json(result);
       } catch (error) {
         return handleError(error);

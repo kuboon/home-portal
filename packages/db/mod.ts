@@ -39,6 +39,7 @@ export {
   editMessage,
   getMessageContext,
   getThread,
+  listMainMessages,
   listMessages,
   listThreads,
   MAX_MESSAGE_LENGTH,
@@ -49,6 +50,7 @@ export {
   type Thread,
 } from "./threads.ts";
 export {
+  type Channel,
   MAX_REACTIONS_PER_MESSAGE,
   reactionsByMessage,
   type ReactionSummary,
