@@ -12,6 +12,7 @@
     "serve": "deno task --cwd server serve",
     "bundle": "deno task --cwd bundler build",
     "migrate": "deno task --cwd packages/db migrate",
+    "pre-deploy": "deno task --cwd packages/db migrate:prod",
     "test": "deno test -P",
     "check": "deno check && deno lint && deno fmt --check"
   },
