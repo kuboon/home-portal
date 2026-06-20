@@ -14,6 +14,7 @@ import {
   reactionsByMessage,
   type ReactionSummary,
 } from "./reactions.ts";
+import { joinedThreadIds, joinThread } from "./participants.ts";
 
 /** Max message length, in characters. */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -24,7 +25,13 @@ export interface Thread {
   title: string;
   createdBy: string;
   createdAt: string;
+  lastPostAt: string;
   archivedAt: string | null;
+}
+
+/** A thread plus whether the viewing user is currently joined to it. */
+export interface ThreadForViewer extends Thread {
+  joined: boolean;
 }
 
 /** Summary of the original message a repost references. */
@@ -60,6 +67,7 @@ function rowToThread(row: Record<string, unknown>): Thread {
     title: String(row.title),
     createdBy: String(row.created_by),
     createdAt: String(row.created_at),
+    lastPostAt: String(row.last_post_at ?? row.created_at),
     archivedAt: row.archived_at == null ? null : String(row.archived_at),
   };
 }
@@ -72,10 +80,12 @@ export async function createThread(
 
   const id = monotonicUlid();
   await (await db()).execute({
-    sql:
-      "INSERT INTO threads (id, home_id, title, created_by) VALUES (?, ?, ?, ?)",
+    sql: "INSERT INTO threads (id, home_id, title, created_by, last_post_at) " +
+      "VALUES (?, ?, ?, ?, datetime('now'))",
     args: [id, input.homeId, title, input.userId],
   });
+  // The creator is the first participant (empty thread: creator only).
+  await joinThread(id, input.userId);
   const thread = await getThread(id);
   if (!thread) throw new Error(`createThread failed to read back ${id}`);
   return thread;
@@ -98,13 +108,19 @@ export const ARCHIVE_AFTER_DAYS = 7;
  * has none. Run lazily before listing so archiving needs no cron.
  */
 export async function archiveStaleThreads(homeId: string): Promise<void> {
-  await (await db()).execute({
+  const client = await db();
+  await client.execute({
     sql: "UPDATE threads SET archived_at = datetime('now') " +
-      "WHERE home_id = ? AND archived_at IS NULL AND id IN (" +
-      "SELECT t.id FROM threads t LEFT JOIN messages m ON m.thread_id = t.id " +
-      "WHERE t.home_id = ? GROUP BY t.id " +
-      `HAVING MAX(COALESCE(m.created_at, t.created_at)) < datetime('now', '-${ARCHIVE_AFTER_DAYS} days'))`,
-    args: [homeId, homeId],
+      "WHERE home_id = ? AND archived_at IS NULL AND " +
+      `COALESCE(last_post_at, created_at) < datetime('now', '-${ARCHIVE_AFTER_DAYS} days')`,
+    args: [homeId],
+  });
+  // Archiving drops everyone out of the thread: no more notifications.
+  await client.execute({
+    sql: "UPDATE thread_participants SET state = 'left', " +
+      "updated_at = datetime('now') WHERE state = 'joined' AND thread_id IN (" +
+      "SELECT id FROM threads WHERE home_id = ? AND archived_at IS NOT NULL)",
+    args: [homeId],
   });
 }
 
@@ -116,6 +132,27 @@ export async function listThreads(homeId: string): Promise<Thread[]> {
     args: [homeId],
   });
   return rows.map(rowToThread);
+}
+
+/** Threads in a home tagged with whether `viewerId` is joined to each. */
+export async function listThreadsForViewer(
+  homeId: string,
+  viewerId: string,
+): Promise<ThreadForViewer[]> {
+  const [threads, joined] = await Promise.all([
+    listThreads(homeId),
+    joinedThreadIds(homeId, viewerId),
+  ]);
+  return threads.map((t) => ({ ...t, joined: joined.has(t.id) }));
+}
+
+/** Mark a thread active now and ensure `userId` is a joined participant. */
+async function touchThread(threadId: string, userId: string): Promise<void> {
+  await (await db()).execute({
+    sql: "UPDATE threads SET last_post_at = datetime('now') WHERE id = ?",
+    args: [threadId],
+  });
+  await joinThread(threadId, userId);
 }
 
 /** Throw if the thread is archived (read-only) or missing. */
@@ -149,6 +186,8 @@ export async function postMessage(
       "VALUES (?, ?, ?, ?, ?)",
     args: [id, input.homeId, input.threadId ?? null, input.authorId, body],
   });
+  // Posting into a thread joins (or re-joins) the author and keeps it active.
+  if (input.threadId) await touchThread(input.threadId, input.authorId);
   const message = await getMessage(id);
   if (!message) throw new Error(`postMessage failed to read back ${id}`);
   return message;
@@ -274,6 +313,7 @@ export async function repostMessage(
       original,
     ],
   });
+  if (input.threadId) await touchThread(input.threadId, input.authorId);
   const message = await getMessage(id);
   if (!message) throw new Error(`repostMessage failed to read back ${id}`);
   return message;

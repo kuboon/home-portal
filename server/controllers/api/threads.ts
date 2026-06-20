@@ -15,9 +15,10 @@ import {
   getRole,
   getThread,
   HomeError,
+  leaveThread,
   listMainMessages,
   listMessages,
-  listThreads,
+  listThreadsForViewer,
   postMessage,
   repostMessage,
   toggleReaction,
@@ -115,7 +116,22 @@ export const threadsController = {
       if (!userId) return unauthorized();
       const { homeId } = context.params;
       if (!(await getRole(homeId, userId))) return forbidden();
-      return Response.json({ threads: await listThreads(homeId) });
+      return Response.json({
+        threads: await listThreadsForViewer(homeId, userId),
+      });
+    },
+
+    async leave(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+      if (!(await getRole(thread.homeId, userId))) return forbidden();
+      await leaveThread(threadId, userId);
+      return Response.json({ ok: true });
     },
 
     async create(context) {

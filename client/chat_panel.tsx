@@ -39,6 +39,7 @@ interface Thread {
   id: string;
   title: string;
   archivedAt: string | null;
+  joined: boolean;
 }
 
 interface Message {
@@ -205,6 +206,12 @@ export const ChatPanel = clientEntry(
         closeDrawer();
         await loadMessages();
         startStream(threadId);
+      });
+
+    const onLeave = (threadId: string) =>
+      run(async () => {
+        await api(`/api/threads/${threadId}/leave`, { method: "POST" });
+        await loadThreads();
       });
 
     const onCreateThread = () =>
@@ -448,6 +455,21 @@ export const ChatPanel = clientEntry(
       );
     };
 
+    const threadGroup = (label: string, list: Thread[]) =>
+      list.length === 0 ? [] : [
+        <li class="menu-title">{label}</li>,
+        ...list.map((t) => (
+          <li>
+            <a
+              class={currentThreadId === t.id ? "active" : ""}
+              mix={[on("click", () => selectChannel(t.id))]}
+            >
+              <span class="truncate">{t.title}</span>
+            </a>
+          </li>
+        )),
+      ];
+
     const sidebar = () => (
       <aside class="bg-base-200 w-72 min-h-full flex flex-col">
         <div class="p-3 border-b border-base-300">
@@ -468,22 +490,15 @@ export const ChatPanel = clientEntry(
               # メイン
             </a>
           </li>
-          <li class="menu-title">スレッド</li>
-          {threads.length === 0
-            ? <li class="px-4 py-1 text-sm opacity-60">まだありません</li>
-            : threads.map((t) => (
-              <li>
-                <a
-                  class={currentThreadId === t.id ? "active" : ""}
-                  mix={[on("click", () => selectChannel(t.id))]}
-                >
-                  <span class="truncate">{t.title}</span>
-                  {t.archivedAt
-                    ? <span class="badge badge-xs">アーカイブ</span>
-                    : null}
-                </a>
-              </li>
-            ))}
+          {threadGroup(
+            "参加中",
+            threads.filter((t) => !t.archivedAt && t.joined),
+          )}
+          {threadGroup(
+            "未参加",
+            threads.filter((t) => !t.archivedAt && !t.joined),
+          )}
+          {threadGroup("アーカイブ", threads.filter((t) => !!t.archivedAt))}
         </ul>
         <div class="p-3 border-t border-base-300">
           <div class="join w-full">
@@ -534,9 +549,20 @@ export const ChatPanel = clientEntry(
               >
                 ☰
               </label>
-              <h2 class="font-bold truncate">{channelTitle()}</h2>
+              <h2 class="font-bold truncate flex-1">{channelTitle()}</h2>
               {archived()
                 ? <span class="badge badge-sm">アーカイブ（読み取り専用）</span>
+                : null}
+              {currentThreadId && currentThread()?.joined && !archived()
+                ? (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    mix={[on("click", () => onLeave(currentThreadId!))]}
+                  >
+                    退出
+                  </button>
+                )
                 : null}
             </div>
 

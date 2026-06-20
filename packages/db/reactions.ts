@@ -8,6 +8,7 @@
 
 import { db } from "./client.ts";
 import { HomeError } from "./homes.ts";
+import { joinThread } from "./participants.ts";
 
 export const MAX_REACTIONS_PER_MESSAGE = 5;
 
@@ -60,6 +61,15 @@ export async function toggleReaction(
       `リアクションは1投稿につき${MAX_REACTIONS_PER_MESSAGE}個までです`,
     );
   }
+  // Reacting to a post that lives in a thread joins (or re-joins) that thread.
+  // The original behind a repost lives elsewhere, so reacting to the repost
+  // joins the repost's thread — never the original's (no cross-thread join).
+  const { rows } = await client.execute({
+    sql: "SELECT thread_id FROM messages WHERE id = ?",
+    args: [messageId],
+  });
+  const threadId = rows[0]?.thread_id;
+  if (threadId != null) await joinThread(String(threadId), userId);
   return { added: true };
 }
 
