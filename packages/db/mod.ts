@@ -49,7 +49,7 @@ export {
   type Thread,
 } from "./threads.ts";
 export {
-  MAX_STAMPS_PER_MESSAGE,
+  MAX_REACTIONS_PER_MESSAGE,
   reactionsByMessage,
   type ReactionSummary,
   toggleReaction,

@@ -62,10 +62,10 @@ export const routes = route({
     post: post("/threads/:threadId/messages"),
     /** POST /api/threads/:threadId/reposts — repost a message here (members). */
     repost: post("/threads/:threadId/reposts"),
-    /** POST /api/messages/:messageId/reactions — toggle a stamp (members). */
+    /** POST /api/messages/:messageId/reactions — toggle a reaction (members). */
     react: post("/messages/:messageId/reactions"),
-    /** GET /api/stamps/recent — the caller's recently-used stamps. */
-    recentStamps: get("/stamps/recent"),
+    /** GET /api/reactions/recent — the caller's recently-used emoji. */
+    recentEmojis: get("/reactions/recent"),
     /** GET /api/threads/:threadId/stream — SSE change pings (members). */
     stream: get("/threads/:threadId/stream"),
     /** POST /api/messages/:messageId — edit a message (author). */

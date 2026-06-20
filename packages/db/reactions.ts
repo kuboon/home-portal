@@ -1,46 +1,48 @@
 /**
- * Reactions (stamps) on messages.
+ * Reactions on messages.
  *
- * A user may place up to {@link MAX_STAMPS_PER_MESSAGE} distinct stamps on a
- * message. Reactions are aggregated per message for display.
+ * A reaction is an emoji a user places on a message. A user may place up to
+ * {@link MAX_REACTIONS_PER_MESSAGE} distinct emoji on a message. Reactions are
+ * aggregated per message for display.
  */
 
 import { db } from "./client.ts";
 import { HomeError } from "./homes.ts";
 
-export const MAX_STAMPS_PER_MESSAGE = 5;
+export const MAX_REACTIONS_PER_MESSAGE = 5;
 
-/** Aggregated reaction for a message: a stamp, its count, and viewer state. */
+/** Aggregated reaction for a message: an emoji, its count, and viewer state. */
 export interface ReactionSummary {
-  stamp: string;
+  emoji: string;
   count: number;
   mine: boolean;
 }
 
 /**
- * Toggle a stamp for a user on a message. Returns whether it is now present.
- * Adding is capped at {@link MAX_STAMPS_PER_MESSAGE} distinct stamps per user.
+ * Toggle an emoji reaction for a user on a message. Returns whether it is now
+ * present. Adding is capped at {@link MAX_REACTIONS_PER_MESSAGE} distinct emoji
+ * per user.
  */
 export async function toggleReaction(
   messageId: string,
   userId: string,
-  stamp: string,
+  emoji: string,
 ): Promise<{ added: boolean }> {
-  const s = stamp.trim();
-  if (!s) throw new HomeError("stamp is required");
-  if (s.length > 32) throw new HomeError("stamp too long");
+  const e = emoji.trim();
+  if (!e) throw new HomeError("emoji is required");
+  if (e.length > 32) throw new HomeError("emoji too long");
 
   const client = await db();
   const existing = await client.execute({
     sql:
-      "SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND stamp = ?",
-    args: [messageId, userId, s],
+      "SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+    args: [messageId, userId, e],
   });
   if (existing.rows.length > 0) {
     await client.execute({
       sql:
-        "DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND stamp = ?",
-      args: [messageId, userId, s],
+        "DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+      args: [messageId, userId, e],
     });
     return { added: false };
   }
@@ -48,14 +50,14 @@ export async function toggleReaction(
   // Enforce the per-user cap in the INSERT itself so two concurrent adds
   // can't both slip past a separate count check.
   const inserted = await client.execute({
-    sql: "INSERT INTO reactions (message_id, user_id, stamp) " +
+    sql: "INSERT INTO reactions (message_id, user_id, emoji) " +
       "SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM reactions " +
       "WHERE message_id = ? AND user_id = ?) < ?",
-    args: [messageId, userId, s, messageId, userId, MAX_STAMPS_PER_MESSAGE],
+    args: [messageId, userId, e, messageId, userId, MAX_REACTIONS_PER_MESSAGE],
   });
   if (inserted.rowsAffected === 0) {
     throw new HomeError(
-      `リアクションは1投稿につき${MAX_STAMPS_PER_MESSAGE}個までです`,
+      `リアクションは1投稿につき${MAX_REACTIONS_PER_MESSAGE}個までです`,
     );
   }
   return { added: true };
@@ -67,11 +69,11 @@ export async function reactionsByMessage(
   viewerId: string,
 ): Promise<Map<string, ReactionSummary[]>> {
   const { rows } = await (await db()).execute({
-    sql: "SELECT r.message_id, r.stamp, COUNT(*) AS count, " +
+    sql: "SELECT r.message_id, r.emoji, COUNT(*) AS count, " +
       "MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) AS mine " +
       "FROM reactions r JOIN messages m ON m.id = r.message_id " +
       "WHERE m.thread_id = ? " +
-      "GROUP BY r.message_id, r.stamp ORDER BY count DESC, r.stamp",
+      "GROUP BY r.message_id, r.emoji ORDER BY count DESC, r.emoji",
     args: [viewerId, threadId],
   });
   const map = new Map<string, ReactionSummary[]>();
@@ -79,7 +81,7 @@ export async function reactionsByMessage(
     const id = String(row.message_id);
     const list = map.get(id) ?? [];
     list.push({
-      stamp: String(row.stamp),
+      emoji: String(row.emoji),
       count: Number(row.count),
       mine: Number(row.mine) === 1,
     });
