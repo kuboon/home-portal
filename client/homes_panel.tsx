@@ -33,26 +33,6 @@ interface Member {
   role: "admin" | "member";
 }
 
-interface Thread {
-  id: string;
-  title: string;
-  archivedAt: string | null;
-}
-
-interface Message {
-  id: string;
-  authorId: string;
-  authorName: string;
-  body: string;
-  createdAt: string;
-  editedAt: string | null;
-  deleted: boolean;
-  repost: { authorName: string; body: string; deleted: boolean } | null;
-  reactions: { emoji: string; count: number; mine: boolean }[];
-}
-
-const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
-
 export const HomesPanel = clientEntry(
   "/homes_panel.js#HomesPanel",
   function HomesPanel(handle: Handle<HomesPanelProps>) {
@@ -62,21 +42,13 @@ export const HomesPanel = clientEntry(
     let homes: HomeWithRole[] = [];
     let selectedId: string | null = null;
     let members: Member[] = [];
-    let threads: Thread[] = [];
-    let selectedThreadId: string | null = null;
-    let messages: Message[] = [];
     let newHomeName = "";
     let addUserId = "";
-    let newThreadTitle = "";
-    let newMessage = "";
     let fetchDpop: FetchDpop | null = null;
-    let streamAbort: AbortController | null = null;
     let inviteToken: string | null = null;
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
     let joinCode = "";
     let themeDraft = "";
-    let recentEmojis: string[] = [];
-    let paletteFor: string | null = null;
 
     /** Inject the selected home's custom CSS into a dedicated <style>. */
     const applyTheme = (css: string) => {
@@ -96,8 +68,6 @@ export const HomesPanel = clientEntry(
     };
 
     const selectedRole = () => homes.find((h) => h.id === selectedId)?.role;
-    const selectedArchived = () =>
-      !!threads.find((t) => t.id === selectedThreadId)?.archivedAt;
 
     /** Call a DPoP-protected JSON endpoint; throws on non-2xx with its error. */
     const api = async (
@@ -126,75 +96,6 @@ export const HomesPanel = clientEntry(
       };
       members = data.members;
     };
-
-    const loadThreads = async (homeId: string) => {
-      const data = await api(`/api/homes/${homeId}/threads`) as {
-        threads: Thread[];
-      };
-      threads = data.threads;
-    };
-
-    const loadMessages = async (threadId: string) => {
-      const data = await api(`/api/threads/${threadId}/messages`) as {
-        messages: Message[];
-      };
-      messages = data.messages;
-    };
-
-    /**
-     * Open the thread's SSE stream. The server emits a `sync` ping on every
-     * change (post/edit/delete); we re-fetch the thread's messages. Read with
-     * fetchDpop because EventSource can't send the DPoP header.
-     */
-    const startStream = (threadId: string) => {
-      streamAbort?.abort();
-      const ac = new AbortController();
-      streamAbort = ac;
-      (async () => {
-        const response = await fetchDpop!(
-          `/api/threads/${threadId}/stream`,
-          { signal: ac.signal },
-        );
-        if (!response.ok || !response.body) return;
-        const reader = response.body
-          .pipeThrough(new TextDecoderStream())
-          .getReader();
-        let buf = "";
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += value;
-          let idx: number;
-          while ((idx = buf.indexOf("\n\n")) >= 0) {
-            const block = buf.slice(0, idx);
-            buf = buf.slice(idx + 2);
-            const event = block.split("\n").find((l) => l.startsWith("event:"))
-              ?.slice(6).trim();
-            if (event === "sync" && selectedThreadId === threadId) {
-              await loadMessages(threadId);
-              handle.update();
-            }
-          }
-        }
-      })().catch(() => {});
-    };
-
-    const loadRecentEmojis = async () => {
-      const data = await api("/api/reactions/recent") as { emojis: string[] };
-      recentEmojis = data.emojis;
-    };
-
-    const onToggleReaction = (messageId: string, emoji: string) =>
-      run(async () => {
-        paletteFor = null;
-        await api(`/api/messages/${messageId}/reactions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ emoji }),
-        });
-        if (selectedThreadId) await loadMessages(selectedThreadId);
-        await loadRecentEmojis();
-      });
 
     const run = async (fn: () => Promise<void>) => {
       error = "";
@@ -230,16 +131,12 @@ export const HomesPanel = clientEntry(
 
     const onSelect = (homeId: string) =>
       run(async () => {
-        streamAbort?.abort();
         stopInviteHeartbeat();
         selectedId = homeId;
-        selectedThreadId = null;
-        messages = [];
         const home = homes.find((h) => h.id === homeId);
         themeDraft = home?.themeCss ?? "";
         applyTheme(themeDraft);
         await loadMembers(homeId);
-        await loadThreads(homeId);
       });
 
     const onSaveTheme = () =>
@@ -289,73 +186,6 @@ export const HomesPanel = clientEntry(
         await loadHomes();
       });
 
-    const onCreateThread = () =>
-      run(async () => {
-        const title = newThreadTitle.trim();
-        if (!title || !selectedId) return;
-        await api(`/api/homes/${selectedId}/threads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
-        });
-        newThreadTitle = "";
-        await loadThreads(selectedId);
-      });
-
-    const onSelectThread = (threadId: string) =>
-      run(async () => {
-        selectedThreadId = threadId;
-        await loadMessages(threadId);
-        startStream(threadId);
-      });
-
-    const onPostMessage = () =>
-      run(async () => {
-        const body = newMessage.trim();
-        if (!body || !selectedThreadId) return;
-        await api(`/api/threads/${selectedThreadId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
-        });
-        newMessage = "";
-        await loadMessages(selectedThreadId);
-      });
-
-    const onEditMessage = (messageId: string, current: string) =>
-      run(async () => {
-        const next = globalThis.prompt("メッセージを編集", current);
-        if (next == null) return;
-        const body = next.trim();
-        if (!body) return;
-        await api(`/api/messages/${messageId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
-        });
-        if (selectedThreadId) await loadMessages(selectedThreadId);
-      });
-
-    const onDeleteMessage = (messageId: string) =>
-      run(async () => {
-        if (!globalThis.confirm("このメッセージを削除しますか？")) return;
-        await api(`/api/messages/${messageId}`, { method: "DELETE" });
-        if (selectedThreadId) await loadMessages(selectedThreadId);
-      });
-
-    const onRepost = (sourceMessageId: string) =>
-      run(async () => {
-        if (!selectedThreadId) return;
-        const comment = globalThis.prompt("引用にコメント（任意）", "");
-        if (comment == null) return;
-        await api(`/api/threads/${selectedThreadId}/reposts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sourceMessageId, body: comment }),
-        });
-        await loadMessages(selectedThreadId);
-      });
-
     const onAddMember = () =>
       run(async () => {
         const uid = addUserId.trim();
@@ -396,7 +226,6 @@ export const HomesPanel = clientEntry(
           userId = session.userId;
           if (userId) {
             await loadHomes();
-            await loadRecentEmojis();
           }
         } catch (e) {
           error = (e as Error).message;
@@ -464,119 +293,6 @@ export const HomesPanel = clientEntry(
       );
     };
 
-    const messageBubble = (m: Message) => {
-      if (m.deleted) {
-        return (
-          <div class="chat chat-start">
-            <div class="chat-header">{m.authorName}</div>
-            <div class="chat-bubble chat-bubble-neutral italic opacity-60">
-              削除されました
-            </div>
-          </div>
-        );
-      }
-      const mine = m.authorId === userId;
-      const canDelete = mine || selectedRole() === "admin";
-      return (
-        <div class="chat chat-start">
-          <div class="chat-header">
-            {m.authorName}
-            <time class="text-xs opacity-50 ml-1">{m.createdAt}</time>
-            {m.editedAt
-              ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
-              : null}
-          </div>
-          <div class="chat-bubble">
-            {m.repost
-              ? (
-                <div class="border-l-4 border-base-content/20 pl-2 mb-1 text-sm opacity-80">
-                  <span class="font-semibold">{m.repost.authorName}</span>:{" "}
-                  {m.repost.deleted
-                    ? <span class="italic">削除されました</span>
-                    : m.repost.body}
-                </div>
-              )
-              : null}
-            {m.body}
-          </div>
-          <div class="chat-footer opacity-60">
-            {selectedArchived() ? null : (
-              <button
-                type="button"
-                class="link link-hover text-xs mr-2"
-                mix={[on("click", () => onRepost(m.id))]}
-              >
-                引用
-              </button>
-            )}
-            {!selectedArchived() && mine
-              ? (
-                <button
-                  type="button"
-                  class="link link-hover text-xs mr-2"
-                  mix={[on("click", () => onEditMessage(m.id, m.body))]}
-                >
-                  編集
-                </button>
-              )
-              : null}
-            {!selectedArchived() && canDelete
-              ? (
-                <button
-                  type="button"
-                  class="link link-hover text-xs"
-                  mix={[on("click", () => onDeleteMessage(m.id))]}
-                >
-                  削除
-                </button>
-              )
-              : null}
-            {selectedArchived() ? null : (
-              <button
-                type="button"
-                class="link link-hover text-xs ml-2"
-                mix={[on("click", () => {
-                  paletteFor = paletteFor === m.id ? null : m.id;
-                  handle.update();
-                })]}
-              >
-                ＋リアクション
-              </button>
-            )}
-          </div>
-          {m.reactions.length > 0 || paletteFor === m.id
-            ? (
-              <div class="chat-footer flex flex-wrap gap-1 mt-1">
-                {m.reactions.map((r) => (
-                  <button
-                    type="button"
-                    class={`badge ${r.mine ? "badge-primary" : "badge-ghost"}`}
-                    disabled={selectedArchived()}
-                    mix={[on("click", () => onToggleReaction(m.id, r.emoji))]}
-                  >
-                    {r.emoji} {r.count}
-                  </button>
-                ))}
-                {paletteFor === m.id
-                  ? [...new Set([...recentEmojis, ...DEFAULT_EMOJIS])].map((
-                    e,
-                  ) => (
-                    <button
-                      type="button"
-                      class="btn btn-xs"
-                      mix={[on("click", () => onToggleReaction(m.id, e))]}
-                    >
-                      {e}
-                    </button>
-                  ))
-                  : null}
-              </div>
-            )
-            : null}
-        </div>
-      );
-    };
-
     return () => {
       if (!ready) {
         return <div class="alert alert-soft">読み込み中…</div>;
@@ -634,13 +350,32 @@ export const HomesPanel = clientEntry(
                   <ul class="menu bg-base-200 rounded-box">
                     {homes.map((h) => (
                       <li>
-                        <a
-                          class={selectedId === h.id ? "active" : ""}
-                          mix={[on("click", () => onSelect(h.id))]}
-                        >
-                          {h.name}
-                          <span class="badge badge-sm">{h.role}</span>
-                        </a>
+                        <div class="flex items-center justify-between gap-2">
+                          <a
+                            class="flex-1 font-medium link link-hover"
+                            href={`/home/${h.id}`}
+                            rmx-target="content"
+                          >
+                            {h.name}
+                            <span class="badge badge-sm ml-1">{h.role}</span>
+                          </a>
+                          <a
+                            class="btn btn-primary btn-xs"
+                            href={`/home/${h.id}`}
+                            rmx-target="content"
+                          >
+                            開く
+                          </a>
+                          <button
+                            type="button"
+                            class={`btn btn-ghost btn-xs ${
+                              selectedId === h.id ? "btn-active" : ""
+                            }`}
+                            mix={[on("click", () => onSelect(h.id))]}
+                          >
+                            管理
+                          </button>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -776,100 +511,21 @@ export const HomesPanel = clientEntry(
 
                 <div class="card card-border bg-base-100">
                   <div class="card-body">
-                    <h2 class="card-title">スレッド</h2>
-                    <div class="join">
-                      <input
-                        class="input input-bordered input-sm join-item"
-                        placeholder="新しいスレッドのタイトル"
-                        value={newThreadTitle}
-                        mix={[on<HTMLInputElement>("input", (e) => {
-                          newThreadTitle = (e.target as HTMLInputElement).value;
-                          handle.update();
-                        })]}
-                      />
-                      <button
-                        type="button"
-                        class="btn btn-sm join-item"
-                        mix={[on("click", onCreateThread)]}
+                    <h2 class="card-title">チャット</h2>
+                    <p class="opacity-70">
+                      メインチャンネルとスレッドでの会話はチャット画面で行います。
+                    </p>
+                    <div class="card-actions">
+                      <a
+                        class="btn btn-primary"
+                        href={`/home/${selectedId}`}
+                        rmx-target="content"
                       >
-                        作成
-                      </button>
+                        このホームのチャットを開く →
+                      </a>
                     </div>
-                    {threads.length === 0
-                      ? <p class="opacity-70">まだスレッドがありません。</p>
-                      : (
-                        <ul class="menu bg-base-200 rounded-box">
-                          {threads.map((t) => (
-                            <li>
-                              <a
-                                class={selectedThreadId === t.id
-                                  ? "active"
-                                  : ""}
-                                mix={[on("click", () => onSelectThread(t.id))]}
-                              >
-                                {t.title}
-                                {t.archivedAt
-                                  ? (
-                                    <span class="badge badge-sm">
-                                      アーカイブ
-                                    </span>
-                                  )
-                                  : null}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
                   </div>
                 </div>
-
-                {selectedThreadId
-                  ? (
-                    <div class="card card-border bg-base-100">
-                      <div class="card-body">
-                        <h2 class="card-title">メッセージ</h2>
-                        <div class="space-y-2">
-                          {messages.length === 0
-                            ? (
-                              <p class="opacity-70">
-                                まだメッセージがありません。
-                              </p>
-                            )
-                            : messages.map(messageBubble)}
-                        </div>
-                        {selectedArchived()
-                          ? (
-                            <div class="alert alert-soft mt-2">
-                              <span>
-                                このスレッドはアーカイブ済みです（読み取り専用）。
-                              </span>
-                            </div>
-                          )
-                          : (
-                            <div class="join mt-2 w-full">
-                              <input
-                                class="input input-bordered join-item flex-1"
-                                placeholder="メッセージを入力"
-                                value={newMessage}
-                                mix={[on<HTMLInputElement>("input", (e) => {
-                                  newMessage =
-                                    (e.target as HTMLInputElement).value;
-                                  handle.update();
-                                })]}
-                              />
-                              <button
-                                type="button"
-                                class="btn btn-primary join-item"
-                                mix={[on("click", onPostMessage)]}
-                              >
-                                送信
-                              </button>
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                  )
-                  : null}
               </div>
             )
             : null}

@@ -5,6 +5,10 @@ export const routes = route({
   welcome: get("/welcome"),
   signin: get("/signin"),
   homes: get("/homes"),
+  /** Chat for a home (main channel). */
+  homeChat: get("/home/:homeId"),
+  /** Chat for a specific thread in a home. */
+  homeThread: get("/home/:homeId/thread/:threadId"),
   agents: get("/agents"),
   notifications: get("/notifications"),
   /** Public JWKS so the IdP can verify our RP client assertions. */
