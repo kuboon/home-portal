@@ -457,9 +457,9 @@ export const ChatPanel = clientEntry(
 
     const threadGroup = (label: string, list: Thread[]) =>
       list.length === 0 ? [] : [
-        <li class="menu-title">{label}</li>,
+        <li key={`title-${label}`} class="menu-title">{label}</li>,
         ...list.map((t) => (
-          <li>
+          <li key={t.id}>
             <a
               class={currentThreadId === t.id ? "active" : ""}
               mix={[on("click", () => selectChannel(t.id))]}
