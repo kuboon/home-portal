@@ -42,13 +42,22 @@ export {
   listMainMessages,
   listMessages,
   listThreads,
+  listThreadsForViewer,
   MAX_MESSAGE_LENGTH,
   type Message,
   postMessage,
   repostMessage,
   type RepostOf,
   type Thread,
+  type ThreadForViewer,
 } from "./threads.ts";
+export {
+  joinedUserIds,
+  joinThread,
+  joinThreadMany,
+  leaveThread,
+  type ParticipantState,
+} from "./participants.ts";
 export {
   type Channel,
   MAX_REACTIONS_PER_MESSAGE,

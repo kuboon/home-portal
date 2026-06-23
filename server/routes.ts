@@ -60,6 +60,8 @@ export const routes = route({
     list: get("/homes/:homeId/threads"),
     /** POST /api/homes/:homeId/threads — create a thread (members). */
     create: post("/homes/:homeId/threads"),
+    /** POST /api/threads/:threadId/leave — leave a thread (stop notifications). */
+    leave: post("/threads/:threadId/leave"),
     /** GET /api/homes/:homeId/messages — main-channel messages (members). */
     mainMessages: get("/homes/:homeId/messages"),
     /** POST /api/homes/:homeId/messages — post to the main channel (members). */
