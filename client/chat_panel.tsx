@@ -43,6 +43,13 @@ interface Thread {
   joined: boolean;
 }
 
+interface Member {
+  userId: string;
+  displayName: string;
+  isAgent: boolean;
+  role: "admin" | "member";
+}
+
 interface Message {
   id: string;
   authorId: string;
@@ -74,12 +81,21 @@ export const ChatPanel = clientEntry(
     let currentThreadId: string | null = handle.props.threadId || null;
     let messages: Message[] = [];
     let newMessage = "";
-    let newThreadTitle = "";
     let recentEmojis: string[] = [];
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
     let fetchDpop: FetchDpop | null = null;
     let streamAbort: AbortController | null = null;
+    // Settings overlay + per-home management.
+    let themeCss = "";
+    let settingsOpen = false;
+    let homeSettingsOpen = false;
+    let nameDraft = "";
+    let members: Member[] = [];
+    let addUserId = "";
+    let themeDraft = "";
+    let inviteToken: string | null = null;
+    let inviteTimer: ReturnType<typeof setInterval> | null = null;
 
     const currentThread = () => threads.find((t) => t.id === currentThreadId);
     const archived = () => !!currentThread()?.archivedAt;
@@ -142,7 +158,8 @@ export const ChatPanel = clientEntry(
       if (!home) throw new Error("このホームにアクセスできません");
       homeName = home.name;
       role = home.role;
-      applyTheme(home.themeCss);
+      themeCss = home.themeCss;
+      applyTheme(themeCss);
     };
 
     const loadThreads = async () => {
@@ -247,18 +264,112 @@ export const ChatPanel = clientEntry(
         await loadThreads();
       });
 
-    const onCreateThread = () =>
+    const loadMembers = async () => {
+      const data = await api(`/api/homes/${homeId}/members`) as {
+        members: Member[];
+      };
+      members = data.members;
+    };
+
+    const openSettings = () =>
       run(async () => {
-        const title = newThreadTitle.trim();
-        if (!title) return;
-        const data = await api(`/api/homes/${homeId}/threads`, {
+        closeDrawer();
+        await loadMembers();
+        nameDraft = members.find((m) => m.userId === userId)?.displayName ??
+          userId ?? "";
+        themeDraft = themeCss;
+        settingsOpen = true;
+      });
+
+    const closeSettings = () => {
+      settingsOpen = false;
+      homeSettingsOpen = false;
+      stopInviteHeartbeat();
+      handle.update();
+    };
+
+    const onSaveName = () =>
+      run(async () => {
+        await api(`/api/homes/${homeId}/name`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
-        }) as { thread: Thread };
-        newThreadTitle = "";
-        await loadThreads();
-        await selectChannel(data.thread.id);
+          body: JSON.stringify({ displayName: nameDraft }),
+        });
+        await loadMembers();
+        await loadMessages(); // author name reflects the new name
+      });
+
+    const onAddMember = () =>
+      run(async () => {
+        const uid = addUserId.trim();
+        if (!uid) return;
+        await api(`/api/homes/${homeId}/members`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: uid }),
+        });
+        addUserId = "";
+        await loadMembers();
+      });
+
+    const onSetRole = (uid: string, r: "admin" | "member") =>
+      run(async () => {
+        await api(`/api/homes/${homeId}/members/${uid}/role`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: r }),
+        });
+        await loadMembers();
+        await loadHome(); // my own role may have changed
+      });
+
+    const onRemoveMember = (uid: string) =>
+      run(async () => {
+        await api(`/api/homes/${homeId}/members/${uid}`, { method: "DELETE" });
+        await loadMembers();
+      });
+
+    const stopInviteHeartbeat = () => {
+      if (inviteTimer !== null) {
+        clearInterval(inviteTimer);
+        inviteTimer = null;
+      }
+      inviteToken = null;
+    };
+
+    const onInvite = () =>
+      run(async () => {
+        const data = await api(`/api/homes/${homeId}/invite`, {
+          method: "POST",
+        }) as { token: string };
+        inviteToken = data.token;
+        if (inviteTimer !== null) clearInterval(inviteTimer);
+        inviteTimer = setInterval(() => {
+          if (inviteToken && fetchDpop) {
+            fetchDpop(`/api/invites/${inviteToken}/heartbeat`, {
+              method: "POST",
+            }).catch(() => {});
+          }
+        }, 20_000);
+      });
+
+    const onCloseInvite = () =>
+      run(async () => {
+        const token = inviteToken;
+        stopInviteHeartbeat();
+        if (token) await api(`/api/invites/${token}`, { method: "DELETE" });
+      });
+
+    const onSaveTheme = () =>
+      run(async () => {
+        const data = await api(`/api/homes/${homeId}/theme`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ css: themeDraft }),
+        }) as { themeCss: string };
+        themeDraft = data.themeCss;
+        themeCss = data.themeCss;
+        applyTheme(themeCss);
       });
 
     const onPost = () =>
@@ -560,11 +671,7 @@ export const ChatPanel = clientEntry(
     const sidebar = () => (
       <aside class="bg-base-200 w-72 min-h-full flex flex-col">
         <div class="p-3 border-b border-base-300">
-          <a
-            class="font-bold text-lg link link-hover"
-            href="/homes"
-            rmx-target="content"
-          >
+          <a class="font-bold text-lg link link-hover" href="/homes">
             {homeName || "ホーム"}
           </a>
         </div>
@@ -587,28 +694,233 @@ export const ChatPanel = clientEntry(
           )}
           {threadGroup("アーカイブ", threads.filter((t) => !!t.archivedAt))}
         </ul>
-        <div class="p-3 border-t border-base-300">
-          <div class="join w-full">
+        <div class="p-2 border-t border-base-300">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm w-full justify-start"
+            aria-label="メニュー"
+            mix={[on("click", openSettings)]}
+          >
+            ⚙ 設定
+          </button>
+        </div>
+      </aside>
+    );
+
+    const settingsOverlay = () => (
+      <div class="fixed inset-0 z-30 bg-base-100 overflow-y-auto">
+        <div class="max-w-2xl mx-auto p-4 space-y-6">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold">設定</h2>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              aria-label="閉じる"
+              mix={[on("click", closeSettings)]}
+            >
+              ✕
+            </button>
+          </div>
+
+          {error
+            ? (
+              <div role="alert" class="alert alert-error alert-soft">
+                <span>{error}</span>
+              </div>
+            )
+            : null}
+
+          <div class="card card-border bg-base-100">
+            <div class="card-body">
+              <h3 class="card-title text-base">自分の設定</h3>
+              <label class="text-sm opacity-70">このホームでの表示名</label>
+              <div class="join">
+                <input
+                  class="input input-bordered input-sm join-item flex-1"
+                  value={nameDraft}
+                  mix={[on<HTMLInputElement>("input", (e) => {
+                    nameDraft = (e.target as HTMLInputElement).value;
+                    handle.update();
+                  })]}
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm btn-primary join-item"
+                  mix={[on("click", onSaveName)]}
+                >
+                  保存
+                </button>
+              </div>
+              <div class="text-sm opacity-50 mt-2">
+                スタンプの設定（未実装）
+              </div>
+              <div class="text-sm opacity-50">MCP 連携の設定（未実装）</div>
+            </div>
+          </div>
+
+          {role === "admin"
+            ? (
+              <div class="card card-border bg-base-100">
+                <div class="card-body">
+                  <div class="flex items-center justify-between">
+                    <h3 class="card-title text-base">ホームの設定</h3>
+                    <button
+                      type="button"
+                      class={`btn btn-sm ${
+                        homeSettingsOpen ? "btn-active" : ""
+                      }`}
+                      mix={[on("click", () => {
+                        homeSettingsOpen = !homeSettingsOpen;
+                        handle.update();
+                      })]}
+                    >
+                      {homeSettingsOpen ? "閉じる" : "開く"}
+                    </button>
+                  </div>
+                  {homeSettingsOpen ? homeSettings() : null}
+                </div>
+              </div>
+            )
+            : null}
+        </div>
+      </div>
+    );
+
+    const homeSettings = () => (
+      <div class="space-y-4 mt-2">
+        <div>
+          <div class="flex items-center gap-2">
             <input
-              class="input input-bordered input-sm join-item flex-1"
-              placeholder="新しいスレッド"
-              value={newThreadTitle}
+              class="input input-bordered input-sm flex-1"
+              placeholder="追加するユーザーの userId"
+              value={addUserId}
               mix={[on<HTMLInputElement>("input", (e) => {
-                newThreadTitle = (e.target as HTMLInputElement).value;
+                addUserId = (e.target as HTMLInputElement).value;
                 handle.update();
               })]}
             />
             <button
               type="button"
-              class="btn btn-sm join-item"
-              mix={[on("click", onCreateThread)]}
+              class="btn btn-sm"
+              mix={[on("click", onAddMember)]}
             >
-              作成
+              メンバー追加
             </button>
           </div>
+          <div class="mt-2">
+            {inviteToken
+              ? (
+                <div class="alert alert-soft items-center gap-2">
+                  <span class="text-sm">
+                    招待コード（この画面を開いている間有効）:{" "}
+                    <code>{inviteToken}</code>
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-xs"
+                    mix={[on("click", onCloseInvite)]}
+                  >
+                    閉じる
+                  </button>
+                </div>
+              )
+              : (
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline"
+                  mix={[on("click", onInvite)]}
+                >
+                  招待コードを発行
+                </button>
+              )}
+          </div>
         </div>
-      </aside>
+
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>ユーザー</th>
+              <th>ロール</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>{members.map(memberRow)}</tbody>
+        </table>
+
+        <div>
+          <h4 class="font-semibold text-sm">テーマ（カスタム CSS）</h4>
+          <p class="text-xs opacity-60">
+            url() や @import などのネットワーク取得は保存時に無効化されます。
+          </p>
+          <textarea
+            class="textarea textarea-bordered font-mono text-sm w-full"
+            rows={4}
+            placeholder=".chat-bubble { background: #fde; }"
+            value={themeDraft}
+            mix={[on<HTMLTextAreaElement>("input", (e) => {
+              themeDraft = (e.target as HTMLTextAreaElement).value;
+              handle.update();
+            })]}
+          >
+          </textarea>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary mt-1"
+            mix={[on("click", onSaveTheme)]}
+          >
+            テーマを保存
+          </button>
+        </div>
+      </div>
     );
+
+    const memberRow = (m: Member) => {
+      const canManage = role === "admin" && m.userId !== userId;
+      return (
+        <tr key={m.userId}>
+          <td>
+            {m.displayName}
+            {m.isAgent ? <span class="badge badge-xs ml-1">agent</span> : null}
+            <div class="text-xs opacity-60">{m.userId}</div>
+          </td>
+          <td>
+            <span
+              class={`badge badge-sm ${
+                m.role === "admin" ? "badge-primary" : "badge-ghost"
+              }`}
+            >
+              {m.role}
+            </span>
+          </td>
+          <td class="text-right">
+            {canManage
+              ? (
+                <div class="join">
+                  <button
+                    type="button"
+                    class="btn btn-xs join-item"
+                    mix={[on("click", () =>
+                      onSetRole(
+                        m.userId,
+                        m.role === "admin" ? "member" : "admin",
+                      ))]}
+                  >
+                    {m.role === "admin" ? "member に" : "admin に"}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-error join-item"
+                    mix={[on("click", () => onRemoveMember(m.userId))]}
+                  >
+                    削除
+                  </button>
+                </div>
+              )
+              : null}
+          </td>
+        </tr>
+      );
+    };
 
     return () => {
       if (!ready) {
@@ -619,13 +931,14 @@ export const ChatPanel = clientEntry(
           <div class="alert alert-soft m-4">
             <span>
               チャットを使うにはサインインが必要です。{" "}
-              <a class="link" href="/signin" rmx-target="content">サインイン</a>
+              <a class="link" href="/signin">サインイン</a>
             </span>
           </div>
         );
       }
       return (
-        <div class="drawer lg:drawer-open h-[calc(100dvh-4rem)]">
+        <div class="drawer lg:drawer-open h-[100dvh]">
+          {settingsOpen ? settingsOverlay() : null}
           <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
           <div class="drawer-content flex flex-col min-w-0">
             <div class="flex items-center gap-2 p-2 border-b border-base-300">
