@@ -219,6 +219,22 @@ export const ChatPanel = clientEntry(
         await loadThreads();
       });
 
+    const onPickupToNewThread = (messageId: string) =>
+      run(async () => {
+        const title = globalThis.prompt("この投稿から新しいスレッドを作成", "");
+        if (title == null || !title.trim()) return;
+        const data = await api(`/api/homes/${homeId}/threads`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: title.trim(),
+            sourcePostIds: [messageId],
+          }),
+        }) as { thread: Thread };
+        await loadThreads();
+        await selectChannel(data.thread.id);
+      });
+
     const onRenameThread = (threadId: string, current: string) =>
       run(async () => {
         const next = globalThis.prompt("スレッド名を編集", current);
@@ -420,6 +436,13 @@ export const ChatPanel = clientEntry(
                 引用
               </button>
             )}
+            <button
+              type="button"
+              class="link link-hover text-xs mr-2"
+              mix={[on("click", () => onPickupToNewThread(m.id))]}
+            >
+              スレッド化
+            </button>
             {!archived() && mine
               ? (
                 <button

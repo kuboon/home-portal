@@ -11,14 +11,17 @@ import {
   archiveStaleThreads,
   createThread,
   editMessage,
+  hideMessage,
   listMainMessages,
   listMessages,
   listThreads,
+  pickupIntoThread,
   postMessage,
   renameThread,
   repostMessage,
   tombstoneMessage,
 } from "./threads.ts";
+import { joinedUserIds } from "./participants.ts";
 import { db } from "./client.ts";
 
 if (!Deno.env.get("TURSO_DATABASE_URL")) {
@@ -225,6 +228,57 @@ Deno.test("quotedIn lists the threads that repost a post (bidirectional link)", 
   // The repost itself (inside the thread) is not "quoted in" anything.
   const inThread = await listMessages(branch.id, "alice");
   assertEquals(inThread.every((m) => m.quotedIn.length === 0), true);
+});
+
+Deno.test("pickup reposts sources into a thread and seeds original authors", async () => {
+  const home = await setup();
+  await upsertUser({ id: "bob", displayName: "Bob" });
+  // Bob's main-channel post.
+  const bobPost = await postMessage({
+    homeId: home.id,
+    authorId: "bob",
+    body: "bob says hi",
+  });
+  // Alice creates an empty thread, then picks up Bob's post.
+  const thread = await createThread({
+    homeId: home.id,
+    title: "branch",
+    userId: "alice",
+  });
+  const created = await pickupIntoThread({
+    homeId: home.id,
+    threadId: thread.id,
+    sourcePostIds: [bobPost.id],
+    authorId: "alice",
+  });
+
+  assertEquals(created.length, 1);
+  assertEquals(created[0].repost?.body, "bob says hi");
+  // Initial participants: creator (alice) + the picked-up post's author (bob).
+  assertEquals((await joinedUserIds(thread.id)).sort(), ["alice", "bob"]);
+});
+
+Deno.test("pickup rejects hidden sources", async () => {
+  const home = await setup();
+  const thread = await createThread({
+    homeId: home.id,
+    title: "t",
+    userId: "alice",
+  });
+  const secret = await postMessage({
+    homeId: home.id,
+    authorId: "alice",
+    body: "secret",
+  });
+  await hideMessage(secret.id);
+  await assertRejects(() =>
+    pickupIntoThread({
+      homeId: home.id,
+      threadId: thread.id,
+      sourcePostIds: [secret.id],
+      authorId: "alice",
+    })
+  );
 });
 
 Deno.test("renameThread: creator or admin only", async () => {
