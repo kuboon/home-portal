@@ -38,6 +38,7 @@ interface HomeWithRole {
 interface Thread {
   id: string;
   title: string;
+  createdBy: string;
   archivedAt: string | null;
   joined: boolean;
 }
@@ -215,6 +216,18 @@ export const ChatPanel = clientEntry(
     const onLeave = (threadId: string) =>
       run(async () => {
         await api(`/api/threads/${threadId}/leave`, { method: "POST" });
+        await loadThreads();
+      });
+
+    const onRenameThread = (threadId: string, current: string) =>
+      run(async () => {
+        const next = globalThis.prompt("スレッド名を編集", current);
+        if (next == null || !next.trim()) return;
+        await api(`/api/threads/${threadId}/title`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: next.trim() }),
+        });
         await loadThreads();
       });
 
@@ -601,6 +614,23 @@ export const ChatPanel = clientEntry(
                 ☰
               </label>
               <h2 class="font-bold truncate flex-1">{channelTitle()}</h2>
+              {currentThreadId &&
+                  (currentThread()?.createdBy === userId || role === "admin")
+                ? (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    aria-label="スレッド名を編集"
+                    mix={[on("click", () =>
+                      onRenameThread(
+                        currentThreadId!,
+                        currentThread()?.title ?? "",
+                      ))]}
+                  >
+                    ✏️
+                  </button>
+                )
+                : null}
               {archived()
                 ? <span class="badge badge-sm">アーカイブ（読み取り専用）</span>
                 : null}

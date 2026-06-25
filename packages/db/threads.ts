@@ -112,6 +112,28 @@ export async function getThread(id: string): Promise<Thread | null> {
   return rows[0] ? rowToThread(rows[0]) : null;
 }
 
+/**
+ * Rename a thread. The creator may edit their thread's title; an admin may
+ * edit any (full powers). Allowed even on archived threads (a title edit is
+ * not a post).
+ */
+export async function renameThread(
+  input: { threadId: string; title: string; userId: string; isAdmin: boolean },
+): Promise<Thread> {
+  const title = input.title.trim();
+  if (!title) throw new HomeError("title is required");
+  const thread = await getThread(input.threadId);
+  if (!thread) throw new HomeError("thread not found", 404);
+  if (thread.createdBy !== input.userId && !input.isAdmin) {
+    throw new HomeError("作成者または管理者のみ編集できます", 403);
+  }
+  await (await db()).execute({
+    sql: "UPDATE threads SET title = ? WHERE id = ?",
+    args: [title, input.threadId],
+  });
+  return { ...thread, title };
+}
+
 /** Days of inactivity (no posts) after which a thread auto-archives. */
 export const ARCHIVE_AFTER_DAYS = 7;
 
