@@ -20,6 +20,7 @@ import {
   listMessages,
   listThreadsForViewer,
   postMessage,
+  renameThread,
   repostMessage,
   toggleReaction,
   tombstoneMessage,
@@ -133,6 +134,31 @@ export const threadsController = {
       if (!(await getRole(thread.homeId, userId))) return forbidden();
       await leaveThread(threadId, userId);
       return Response.json({ ok: true });
+    },
+
+    async renameThread(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+      const role = await getRole(thread.homeId, userId);
+      if (!role) return forbidden();
+      const body = await context.request.json() as { title?: string };
+      try {
+        const updated = await renameThread({
+          threadId,
+          title: body.title ?? "",
+          userId,
+          isAdmin: role === "admin",
+        });
+        await signalThread(threadId);
+        return Response.json({ thread: updated });
+      } catch (error) {
+        return handleError(error);
+      }
     },
 
     async create(context) {

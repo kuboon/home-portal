@@ -14,6 +14,7 @@ import {
   listMessages,
   listThreads,
   postMessage,
+  renameThread,
   repostMessage,
   toggleReaction,
 } from "@scope/db";
@@ -117,6 +118,31 @@ export const tools: McpTool[] = [
           homeId,
           title: str(args, "title"),
           userId: agentId,
+        });
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "rename_thread",
+    description: "Rename a thread (creator, or any admin).",
+    inputSchema: {
+      type: "object",
+      properties: { threadId: { type: "string" }, title: { type: "string" } },
+      required: ["threadId", "title"],
+    },
+    async handler(agentId, args) {
+      const threadId = str(args, "threadId");
+      const thread = await getThread(threadId);
+      if (!thread) throw new ToolError("thread not found");
+      const role = await requireMember(thread.homeId, agentId);
+      try {
+        return await renameThread({
+          threadId,
+          title: str(args, "title"),
+          userId: agentId,
+          isAdmin: role === "admin",
         });
       } catch (error) {
         return wrap(error);

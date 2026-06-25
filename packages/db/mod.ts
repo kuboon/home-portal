@@ -47,6 +47,7 @@ export {
   type Message,
   postMessage,
   type QuoteRef,
+  renameThread,
   repostMessage,
   type RepostOf,
   type Thread,

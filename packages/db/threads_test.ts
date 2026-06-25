@@ -15,6 +15,7 @@ import {
   listMessages,
   listThreads,
   postMessage,
+  renameThread,
   repostMessage,
   tombstoneMessage,
 } from "./threads.ts";
@@ -224,6 +225,56 @@ Deno.test("quotedIn lists the threads that repost a post (bidirectional link)", 
   // The repost itself (inside the thread) is not "quoted in" anything.
   const inThread = await listMessages(branch.id, "alice");
   assertEquals(inThread.every((m) => m.quotedIn.length === 0), true);
+});
+
+Deno.test("renameThread: creator or admin only", async () => {
+  const home = await setup();
+  await upsertUser({ id: "bob", displayName: "Bob" });
+  await upsertUser({ id: "carol", displayName: "Carol" });
+  const thread = await createThread({
+    homeId: home.id,
+    title: "old",
+    userId: "bob",
+  });
+
+  // Creator can rename.
+  assertEquals(
+    (await renameThread({
+      threadId: thread.id,
+      title: "by-creator",
+      userId: "bob",
+      isAdmin: false,
+    })).title,
+    "by-creator",
+  );
+  // Admin can rename any.
+  assertEquals(
+    (await renameThread({
+      threadId: thread.id,
+      title: "by-admin",
+      userId: "alice",
+      isAdmin: true,
+    })).title,
+    "by-admin",
+  );
+  // A non-creator non-admin cannot.
+  await assertRejects(() =>
+    renameThread({
+      threadId: thread.id,
+      title: "nope",
+      userId: "carol",
+      isAdmin: false,
+    })
+  );
+  // Empty title is rejected.
+  await assertRejects(() =>
+    renameThread({
+      threadId: thread.id,
+      title: "   ",
+      userId: "bob",
+      isAdmin: false,
+    })
+  );
 });
 
 Deno.test("repost references the original and flattens repost-of-repost", async () => {

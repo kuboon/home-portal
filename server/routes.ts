@@ -62,6 +62,8 @@ export const routes = route({
     create: post("/homes/:homeId/threads"),
     /** POST /api/threads/:threadId/leave — leave a thread (stop notifications). */
     leave: post("/threads/:threadId/leave"),
+    /** POST /api/threads/:threadId/title — rename a thread (creator or admin). */
+    renameThread: post("/threads/:threadId/title"),
     /** GET /api/homes/:homeId/messages — main-channel messages (members). */
     mainMessages: get("/homes/:homeId/messages"),
     /** POST /api/homes/:homeId/messages — post to the main channel (members). */
