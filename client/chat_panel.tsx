@@ -49,6 +49,7 @@ interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
+  kind: "normal" | "repost" | "edit";
   deleted: boolean;
   hidden: boolean;
   repost: { authorName: string; body: string; deleted: boolean } | null;
@@ -344,6 +345,15 @@ export const ChatPanel = clientEntry(
     }
 
     const messageBubble = (m: Message) => {
+      if (m.kind === "edit") {
+        // Forward marker left where the post used to be; the edited version is
+        // re-posted at the tail.
+        return (
+          <div class="text-xs italic opacity-50 px-2 py-1">
+            ✏️ {m.authorName} さんがこの投稿を編集しました（最新版は下）
+          </div>
+        );
+      }
       if (m.deleted) {
         return (
           <div class="chat chat-start">

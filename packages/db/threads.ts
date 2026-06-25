@@ -51,11 +51,13 @@ export interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
+  /** 'normal' post, a 'repost' (quote of an original), or an 'edit' marker. */
+  kind: "normal" | "repost" | "edit";
   /** Shown as a deletion to the viewer (author tombstone, or hidden to non-admins). */
   deleted: boolean;
   /** Admin moderation: hidden from non-admins. True only when the viewer is an admin. */
   hidden: boolean;
-  /** Id of the original message this reposts, or `null`. */
+  /** repost → the original it quotes; edit marker → the newer version. */
   repostOf: string | null;
   /** The referenced original's summary when this is a repost. */
   repost: RepostOf | null;
@@ -228,12 +230,15 @@ function rowToMessage(
   row: Record<string, unknown>,
   viewerIsAdmin: boolean,
 ): Message {
+  const kind = (String(row.kind ?? "normal")) as Message["kind"];
   const tombstone = row.tombstone_at != null;
   const hidden = row.hidden_at != null;
   const deletedForViewer = tombstone || (hidden && !viewerIsAdmin);
   const refPostId = row.ref_post_id == null ? null : String(row.ref_post_id);
+  // Only a repost carries a quote preview. An edit marker also has a
+  // ref_post_id (the newer version), but it is a forward pointer, not a quote.
   let repost: RepostOf | null = null;
-  if (refPostId && row.r_author != null) {
+  if (kind === "repost" && refPostId && row.r_author != null) {
     const rDeleted = row.r_tombstone != null || row.r_hidden != null;
     repost = {
       authorName: String(row.r_author),
@@ -250,6 +255,7 @@ function rowToMessage(
     body: deletedForViewer ? "" : String(row.body),
     createdAt: String(row.created_at),
     editedAt: row.edited_at == null ? null : String(row.edited_at),
+    kind,
     deleted: deletedForViewer,
     // Admins see a hidden post's body, flagged as moderated.
     hidden: hidden && viewerIsAdmin,
@@ -272,7 +278,7 @@ async function listChannelMessages(
     ? { clause: "m.thread_id = ?", arg: channel.threadId }
     : { clause: "m.home_id = ? AND m.thread_id IS NULL", arg: channel.homeId };
   const { rows } = await (await db()).execute({
-    sql: `${MESSAGE_SELECT} WHERE ${scope.clause} ORDER BY m.created_at`,
+    sql: `${MESSAGE_SELECT} WHERE ${scope.clause} ORDER BY m.created_at, m.id`,
     args: [scope.arg],
   });
   const messages = rows.map((r) => rowToMessage(r, viewerIsAdmin));
@@ -366,7 +372,14 @@ export async function getMessageContext(
   };
 }
 
-/** Edit a message's body in place and stamp `edited_at`. Author only. */
+/**
+ * Author edit (forward-repost, per the design): the new content is re-posted
+ * at the tail and the old position becomes a forward "edit" marker pointing at
+ * the new version (its body is discarded). Only the author's latest live post
+ * in the channel can be edited. Every existing reference (reposts, prior edit
+ * markers) is re-pointed to the new version, keeping everything flattened to
+ * the latest. Returns the new post.
+ */
 export async function editMessage(
   input: { messageId: string; authorId: string; body: string },
 ): Promise<Message> {
@@ -375,18 +388,59 @@ export async function editMessage(
   if (body.length > MAX_MESSAGE_LENGTH) {
     throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
   }
-  const ctx = await getMessageContext(input.messageId);
-  if (ctx?.threadId) await assertWritable(ctx.threadId);
-  const result = await (await db()).execute({
-    sql: "UPDATE messages SET body = ?, edited_at = datetime('now') " +
-      "WHERE id = ? AND author_id = ? AND tombstone_at IS NULL " +
-      "AND hidden_at IS NULL",
-    args: [body, input.messageId, input.authorId],
+  const client = await db();
+  const { rows } = await client.execute({
+    sql: "SELECT home_id, thread_id, author_id, kind, " +
+      "tombstone_at, hidden_at FROM messages WHERE id = ?",
+    args: [input.messageId],
   });
-  if (result.rowsAffected === 0) {
+  const row = rows[0];
+  if (
+    !row || String(row.author_id) !== input.authorId || row.kind !== "normal" ||
+    row.tombstone_at != null || row.hidden_at != null
+  ) {
     throw new HomeError("message not found or not editable", 404);
   }
-  const message = await getMessage(input.messageId, true);
+  const homeId = String(row.home_id);
+  const threadId = row.thread_id == null ? null : String(row.thread_id);
+  if (threadId) await assertWritable(threadId);
+
+  // Only the author's latest live post in the channel may be edited. Order by
+  // id (monotonic ULID) rather than created_at, whose second granularity ties.
+  const scope = threadId
+    ? { clause: "thread_id = ?", arg: threadId }
+    : { clause: "home_id = ? AND thread_id IS NULL", arg: homeId };
+  const newer = await client.execute({
+    sql: `SELECT 1 FROM messages WHERE ${scope.clause} AND author_id = ? ` +
+      "AND id > ? AND kind = 'normal' AND tombstone_at IS NULL LIMIT 1",
+    args: [scope.arg, input.authorId, input.messageId],
+  });
+  if (newer.rows.length > 0) {
+    throw new HomeError("最新の投稿のみ編集できます");
+  }
+
+  const newId = monotonicUlid();
+  await client.batch([
+    {
+      sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body) " +
+        "VALUES (?, ?, ?, ?, ?)",
+      args: [newId, homeId, threadId, input.authorId, body],
+    },
+    // Re-point existing references (reposts / prior markers) to the new version.
+    {
+      sql: "UPDATE messages SET ref_post_id = ? WHERE ref_post_id = ?",
+      args: [newId, input.messageId],
+    },
+    // The old position becomes a forward edit marker; its body is discarded.
+    {
+      sql:
+        "UPDATE messages SET kind = 'edit', ref_post_id = ?, body = '' WHERE id = ?",
+      args: [newId, input.messageId],
+    },
+  ], "write");
+
+  if (threadId) await touchThread(threadId, input.authorId);
+  const message = await getMessage(newId, true);
   if (!message) throw new Error("editMessage failed to read back");
   return message;
 }

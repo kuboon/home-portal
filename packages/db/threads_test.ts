@@ -93,7 +93,7 @@ Deno.test("main channel: posts with no thread are scoped to the home", async () 
   assertEquals((await listMessages(thread.id)).length, 1);
 });
 
-Deno.test("edit updates body + marks edited; delete leaves a tombstone", async () => {
+Deno.test("edit re-posts at the tail and leaves a forward marker", async () => {
   const home = await setup();
   const thread = await createThread({
     homeId: home.id,
@@ -113,19 +113,88 @@ Deno.test("edit updates body + marks edited; delete leaves a tombstone", async (
     body: "やあ（修正）",
   });
   assertEquals(edited.body, "やあ（修正）");
-  assert(edited.editedAt);
+  assertEquals(edited.kind, "normal");
 
-  // Non-author cannot edit.
-  await upsertUser({ id: "bob", displayName: "Bob" });
+  const after = await listMessages(thread.id);
+  assertEquals(after.length, 2); // forward marker (old position) + new post
+  const marker = after.find((m) => m.id === posted.id)!;
+  assertEquals(marker.kind, "edit");
+  assertEquals(marker.repostOf, edited.id); // points forward to the new version
+  assertEquals(marker.body, "");
+  assertEquals(marker.deleted, false);
+  // The new post is at the tail.
+  assertEquals(after[after.length - 1].id, edited.id);
+
+  // The marker is no longer a normal post, so editing it again is rejected.
   await assertRejects(() =>
-    editMessage({ messageId: posted.id, authorId: "bob", body: "x" })
+    editMessage({ messageId: posted.id, authorId: "alice", body: "x" })
+  );
+});
+
+Deno.test("only the author's latest post is editable; delete leaves a tombstone", async () => {
+  const home = await setup();
+  const thread = await createThread({
+    homeId: home.id,
+    title: "t",
+    userId: "alice",
+  });
+  const first = await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    body: "1",
+  });
+  await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    body: "2",
+  });
+  // `first` is no longer the author's latest → not editable.
+  await assertRejects(() =>
+    editMessage({ messageId: first.id, authorId: "alice", body: "x" })
   );
 
-  await tombstoneMessage(posted.id, "alice");
+  await tombstoneMessage(first.id, "alice");
   const after = await listMessages(thread.id);
-  assertEquals(after.length, 1); // tombstone remains
-  assertEquals(after[0].deleted, true);
-  assertEquals(after[0].body, "");
+  const m = after.find((x) => x.id === first.id)!;
+  assertEquals(m.deleted, true);
+  assertEquals(m.body, "");
+});
+
+Deno.test("editing a post re-points existing reposts to the new version", async () => {
+  const home = await setup();
+  const t1 = await createThread({
+    homeId: home.id,
+    title: "a",
+    userId: "alice",
+  });
+  const t2 = await createThread({
+    homeId: home.id,
+    title: "b",
+    userId: "alice",
+  });
+  const orig = await postMessage({
+    homeId: home.id,
+    threadId: t1.id,
+    authorId: "alice",
+    body: "v1",
+  });
+  const repost = await repostMessage({
+    homeId: home.id,
+    threadId: t2.id,
+    authorId: "alice",
+    sourceMessageId: orig.id,
+  });
+  const edited = await editMessage({
+    messageId: orig.id,
+    authorId: "alice",
+    body: "v2",
+  });
+
+  const r = (await listMessages(t2.id)).find((m) => m.id === repost.id)!;
+  assertEquals(r.repostOf, edited.id); // flattened forward to the new version
+  assertEquals(r.repost?.body, "v2");
 });
 
 Deno.test("repost references the original and flattens repost-of-repost", async () => {
