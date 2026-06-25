@@ -59,8 +59,11 @@ export const invitesController = {
       const { token } = context.params;
       const homeId = await resolveInvite(token);
       if (!homeId) return expired();
+      const body = await context.request.json().catch(() => ({})) as {
+        displayName?: string;
+      };
       try {
-        await addMember(homeId, userId, "member");
+        await addMember(homeId, userId, "member", body.displayName);
       } catch (error) {
         // Already a member is fine — fall through to returning the home.
         if (!(error instanceof HomeError && error.status === 409)) {

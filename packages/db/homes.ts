@@ -71,7 +71,7 @@ export async function setHomeTheme(
 
 /** Create a home and make `userId` its first admin. */
 export async function createHome(
-  input: { name: string; userId: string },
+  input: { name: string; userId: string; displayName?: string },
 ): Promise<Home> {
   const name = input.name.trim();
   if (!name) throw new HomeError("name is required");
@@ -85,8 +85,8 @@ export async function createHome(
     },
     {
       sql:
-        "INSERT INTO memberships (home_id, user_id, role) VALUES (?, ?, 'admin')",
-      args: [id, input.userId],
+        "INSERT INTO memberships (home_id, user_id, role, display_name) VALUES (?, ?, 'admin', ?)",
+      args: [id, input.userId, input.displayName?.trim() || null],
     },
   ], "write");
 
@@ -130,7 +130,8 @@ export async function getRole(
 
 export async function listMembers(homeId: string): Promise<Member[]> {
   const { rows } = await (await db()).execute({
-    sql: "SELECT m.user_id, m.role, m.created_at, u.display_name, u.is_agent " +
+    sql: "SELECT m.user_id, m.role, m.created_at, u.is_agent, " +
+      "COALESCE(m.display_name, u.display_name) AS display_name " +
       "FROM memberships m JOIN users u ON u.id = m.user_id " +
       "WHERE m.home_id = ? ORDER BY m.created_at",
     args: [homeId],
@@ -166,6 +167,7 @@ export async function addMember(
   homeId: string,
   userId: string,
   role: Role = "member",
+  displayName?: string,
 ): Promise<Member> {
   if (!(await getUser(userId))) {
     throw new HomeError(`unknown user: ${userId}`, 404);
@@ -177,12 +179,29 @@ export async function addMember(
     throw new HomeError(`home is full (max ${MAX_MEMBERS})`, 409);
   }
   await (await db()).execute({
-    sql: "INSERT INTO memberships (home_id, user_id, role) VALUES (?, ?, ?)",
-    args: [homeId, userId, role],
+    sql:
+      "INSERT INTO memberships (home_id, user_id, role, display_name) VALUES (?, ?, ?, ?)",
+    args: [homeId, userId, role, displayName?.trim() || null],
   });
   const member = (await listMembers(homeId)).find((m) => m.userId === userId);
   if (!member) throw new Error("addMember failed to read back");
   return member;
+}
+
+/** Set the caller's display name within a home (empty clears to the fallback). */
+export async function setMemberName(
+  homeId: string,
+  userId: string,
+  displayName: string,
+): Promise<void> {
+  if (!(await getRole(homeId, userId))) {
+    throw new HomeError("not a member", 404);
+  }
+  await (await db()).execute({
+    sql: "UPDATE memberships SET display_name = ? WHERE home_id = ? " +
+      "AND user_id = ?",
+    args: [displayName.trim() || null, homeId, userId],
+  });
 }
 
 /** Change a member's role, keeping at least one admin. */

@@ -14,6 +14,7 @@ import {
   listHomesForUser,
   listMembers,
   removeMember,
+  setMemberName,
   setMemberRole,
 } from "./homes.ts";
 
@@ -87,4 +88,43 @@ Deno.test("last admin cannot be demoted or removed", async () => {
 
   await removeMember(home.id, "alice");
   assert(!(await getRole(home.id, "alice")));
+});
+
+Deno.test("per-home display name: set at join, editable, falls back globally", async () => {
+  await freshDb();
+  await upsertUser({ id: "alice", displayName: "Alice" });
+  await upsertUser({ id: "bob", displayName: "bob-global" });
+  const home = await createHome({
+    name: "H",
+    userId: "alice",
+    displayName: "管理人",
+  });
+
+  // Creator's per-home name was captured.
+  let members = await listMembers(home.id);
+  assertEquals(
+    members.find((m) => m.userId === "alice")?.displayName,
+    "管理人",
+  );
+
+  // Added without a name → falls back to the global users.display_name.
+  await addMember(home.id, "bob");
+  members = await listMembers(home.id);
+  assertEquals(
+    members.find((m) => m.userId === "bob")?.displayName,
+    "bob-global",
+  );
+
+  // Bob sets a per-home name.
+  await setMemberName(home.id, "bob", "ボブ");
+  members = await listMembers(home.id);
+  assertEquals(members.find((m) => m.userId === "bob")?.displayName, "ボブ");
+
+  // Clearing it falls back to the global name again.
+  await setMemberName(home.id, "bob", "  ");
+  members = await listMembers(home.id);
+  assertEquals(
+    members.find((m) => m.userId === "bob")?.displayName,
+    "bob-global",
+  );
 });

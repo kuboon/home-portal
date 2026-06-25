@@ -1,18 +1,62 @@
-# 後続プラン (home portal / ホムポタ)
+# 進捗・残タスク (home portal / ホムポタ)
 
-設計の全スコープを一巡し、基盤〜MCP サーバまで実装済み（`main`）。以下は v1 では
-省略した、または現状とは異なる挙動の後続アイデア。
+`DESIGN.md` が正本。ここは実装状況と残タスクの索引。
 
-## 後続アイデア（未着手）
+## 実装済み（`main`・design v2 一巡）
 
-- MCP の**承認フロー**（非管理者エージェントの操作を管理者承認: pending キュー +
-  UI）。
-- メッセージ編集の設計挙動（編集はスレッド末尾へ移動 + 後方参照マーカー）—
-  現状はその場更新 + 編集マーク。
-- スレッドの**アンアーカイブ**、別スレッドを選んでの **Repost
-  UI**（現状は現在スレッドへ）。
-- エージェントのデモ実装（MCP クライアントから実際に投稿する例）。
-- サーバ起点 push の本番 E2E 確認。
+- **基盤**: pre-deploy migration、Turso、DPoP セッション、CI / Deno Deploy。
+- **メインチャンネル**: `thread_id = null` の post（専用テーブルなし）。
+- **チャット UI**: ホーム毎
+  URL（`/home/:id`・`/home/:id/thread/:tid`）、左サイドバー
+  （メイン＋スレッド一覧）、URL 駆動、モバイルドロワー（右スワイプ）。`/homes`
+  はハブ（一覧・作成・参加・メンバー/テーマ/招待）。
+- **スレッド**: `thread_participants`（joined/left）、参加トリガ（post /
+  そのスレッド 内 post への reaction で join、left→復帰）、明示
+  leave、サイドバーの 参加/未参加/ アーカイブ グループ、`last_post_at`
+  ベースの自動アーカイブ（archive 時に全員 left）、
+  **タイトル編集**（作成者/admin）、**pickup**（複数
+  source→スレッド、原本投稿者を 初期参加者に、pickup 枠 5/min・生成 repost は
+  post 枠外）。
+- **post モデル**: `kind`（normal/repost/edit）、`ref_post_id`、**モデレーション
+  分離**（admin `hidden`=本文保持・admin のみ閲覧 / 著者
+  `tombstone`=本文破棄）と ロール別可視性、**前方 repost
+  方式の著者編集**（末尾再 post＋旧位置に edit マーカー、
+  既存参照を最新版へ再ポイント、最新 post のみ編集可）、**双方向リンク** （「N
+  件のスレッドで引用」）、リアクション（絵文字・1 投稿 5 個・recent LRU）。
+- **通知**: スレッドは joined participant 限定 /
+  メインは全メンバー、指数バックオフ
+  （チャンネル×受信者）、チャンネルへディープリンク。
+- **MCP**: list/post/repost/pickup/react/create_thread/rename_thread を web
+  パリティで提供。
+- **ホーム毎の表示名**: `memberships.display_name`（null は users.display_name
+  に フォールバック）。参加（招待受諾）・ホーム作成時に入力、後から変更可。 ※
+  IdP は `sub`(=userId) のみで名前クレームを持たないため、既定値は users の
+  グローバル名（現状 userId 相当）。
+
+## 残タスク（`DESIGN.md` の未実装 + 要決定）
+
+### 機能（未実装）
+
+- **画像スタンプ**（ライブラリ 20 件 / LRU / ホーム共有、MCP 連携）。
+- **画像 post（添付）**。
+- **ゲスト**（`GuestAccess`・スレッド単位招待、repost ジャンプ漏洩対策）。
+- **request → approve**（非管理者の管理操作を admin 承認、`ApprovalRequest`）。
+- **モデレーション**: suspend / ban、スレッド配下 post の一括非表示。
+- **ホーム削除**（admin）。
+- **オンボーディング**: PWA 追加・push 有効化の促し。
+- 細部: スレッドのアンアーカイブは提供しない（仕様）/ 別スレッド選択の Repost UI
+  / エージェントのデモ。
+
+### 要決定（実装前に方針確定が必要）
+
+- **画像の保存方式**: data URL（小・スタンプ向き）か内部 attachment
+  ストレージか。 画像スタンプ・画像添付の双方が依存。
+- **画像 post の保存ポリシー**: 何を・いつまで・どの解像度で保持するか。
+- **ホーム削除**: 物理削除 / 論理削除（痕跡方針なら論理）。
+- **web push の強制度**: 完全任意 / 繰り返し促す / 段階ゲート。
+- 通知バックオフのリセット条件と cap（現状 cap 4 分・静穏でリセット）。
+- 前方 edit マーカー UI の磨き込み、CSS `content`
+  の許可ルール、リアクション頻度制限。
 
 ## スタンプ（ステッカー）— 未実装
 
