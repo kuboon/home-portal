@@ -379,7 +379,6 @@ export const HomesPanel = clientEntry(
                           <a
                             class="flex-1 font-medium link link-hover"
                             href={`/home/${h.id}`}
-                            rmx-target="content"
                           >
                             {h.name}
                             <span class="badge badge-sm ml-1">{h.role}</span>
@@ -387,7 +386,6 @@ export const HomesPanel = clientEntry(
                           <a
                             class="btn btn-primary btn-xs"
                             href={`/home/${h.id}`}
-                            rmx-target="content"
                           >
                             開く
                           </a>
@@ -553,7 +551,6 @@ export const HomesPanel = clientEntry(
                       <a
                         class="btn btn-primary"
                         href={`/home/${selectedId}`}
-                        rmx-target="content"
                       >
                         このホームのチャットを開く →
                       </a>

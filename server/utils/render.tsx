@@ -41,6 +41,28 @@ export function renderPage(
   return renderShell(context);
 }
 
+/**
+ * Render a standalone, full-screen document (no nav shell) hosting a
+ * clientEntry. Used for the chat landing page (`/home/:id`), which is a
+ * navbar-less app screen rather than a fragment in the shared shell.
+ */
+export function renderBareDocument(title: string, body: RemixNode): Response {
+  const doc = (
+    <html lang="ja">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{title}</title>
+        <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
+        <script async type="module" src="/mod.js"></script>
+        <link rel="stylesheet" href="/style.css" />
+      </head>
+      <body class="bg-base-100 text-base-content">{body}</body>
+    </html>
+  );
+  return createHtmlResponse(renderToStream(doc));
+}
+
 export function renderShell(context: RequestContext): Response {
   const { request, router } = context;
   const url = new URL(request.url);
