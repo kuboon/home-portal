@@ -112,10 +112,12 @@ export const HomesPanel = clientEntry(
       run(async () => {
         const name = newHomeName.trim();
         if (!name) return;
+        const displayName =
+          globalThis.prompt(`「${name}」での表示名`, userId ?? "") ?? "";
         await api("/api/homes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
+          body: JSON.stringify({ name, displayName }),
         });
         newHomeName = "";
         await loadHomes();
@@ -181,9 +183,32 @@ export const HomesPanel = clientEntry(
       run(async () => {
         const code = joinCode.trim();
         if (!code) return;
-        await api(`/api/invites/${code}/accept`, { method: "POST" });
+        const displayName =
+          globalThis.prompt("このホームでの表示名", userId ?? "") ?? "";
+        await api(`/api/invites/${code}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ displayName }),
+        });
         joinCode = "";
         await loadHomes();
+      });
+
+    const onSetMyName = () =>
+      run(async () => {
+        if (!selectedId) return;
+        const me = members.find((m) => m.userId === userId);
+        const next = globalThis.prompt(
+          "このホームでの表示名",
+          me?.displayName ?? userId ?? "",
+        );
+        if (next == null) return;
+        await api(`/api/homes/${selectedId}/name`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ displayName: next }),
+        });
+        await loadMembers(selectedId);
       });
 
     const onAddMember = () =>
@@ -407,7 +432,16 @@ export const HomesPanel = clientEntry(
               <div class="space-y-6">
                 <div class="card card-border bg-base-100">
                   <div class="card-body">
-                    <h2 class="card-title">メンバー</h2>
+                    <div class="flex items-center justify-between">
+                      <h2 class="card-title">メンバー</h2>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        mix={[on("click", onSetMyName)]}
+                      >
+                        表示名を変更
+                      </button>
+                    </div>
                     {selectedRole() === "admin"
                       ? (
                         <div class="join">

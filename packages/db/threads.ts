@@ -229,13 +229,18 @@ export async function postMessage(
 }
 
 // Shared SELECT: message + author, plus the referenced original (for reposts).
-const MESSAGE_SELECT = "SELECT m.*, u.display_name, " +
+// The author name is the poster's per-home name (memberships.display_name),
+// falling back to their global users.display_name.
+const MESSAGE_SELECT =
+  "SELECT m.*, COALESCE(mem.display_name, u.display_name) AS display_name, " +
   "o.body AS r_body, o.tombstone_at AS r_tombstone, o.hidden_at AS r_hidden, " +
-  "ou.display_name AS r_author " +
+  "COALESCE(omem.display_name, ou.display_name) AS r_author " +
   "FROM messages m " +
   "JOIN users u ON u.id = m.author_id " +
+  "LEFT JOIN memberships mem ON mem.home_id = m.home_id AND mem.user_id = m.author_id " +
   "LEFT JOIN messages o ON o.id = m.ref_post_id " +
-  "LEFT JOIN users ou ON ou.id = o.author_id";
+  "LEFT JOIN users ou ON ou.id = o.author_id " +
+  "LEFT JOIN memberships omem ON omem.home_id = o.home_id AND omem.user_id = o.author_id";
 
 async function getMessage(
   id: string,

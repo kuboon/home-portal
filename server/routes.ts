@@ -30,6 +30,8 @@ export const routes = route({
     members: get("/:homeId/members"),
     /** POST /api/homes/:homeId/members — add an existing user (admin only). */
     addMember: post("/:homeId/members"),
+    /** POST /api/homes/:homeId/name — set the caller's per-home display name. */
+    setName: post("/:homeId/name"),
     /** POST /api/homes/:homeId/members/:userId/role — change role (admin). */
     setRole: post("/:homeId/members/:userId/role"),
     /** DELETE /api/homes/:homeId/members/:userId — remove member (admin). */

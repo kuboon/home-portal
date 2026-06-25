@@ -21,6 +21,7 @@ import {
   removeMember,
   type Role,
   setHomeTheme,
+  setMemberName,
   setMemberRole,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
@@ -74,10 +75,33 @@ export const homesController = {
     async create(context) {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
-      const body = await context.request.json() as { name?: string };
+      const body = await context.request.json() as {
+        name?: string;
+        displayName?: string;
+      };
       try {
-        const home = await createHome({ name: body.name ?? "", userId });
+        const home = await createHome({
+          name: body.name ?? "",
+          userId,
+          displayName: body.displayName,
+        });
         return Response.json({ home }, { status: 201 });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async setName(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { homeId } = context.params;
+      if (!(await getRole(homeId, userId))) {
+        return Response.json({ error: "not a member" }, { status: 403 });
+      }
+      const body = await context.request.json() as { displayName?: string };
+      try {
+        await setMemberName(homeId, userId, body.displayName ?? "");
+        return Response.json({ ok: true });
       } catch (error) {
         return handleError(error);
       }
