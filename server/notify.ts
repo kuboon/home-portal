@@ -1,13 +1,16 @@
 /**
  * New-message notification dispatch.
  *
- * On a new post, notify the thread's home members (except the author) via Web
- * Push (through the IdP). To avoid flooding an active conversation, each
- * (thread, user) pair has an exponential backoff: 1min → 2min → 4min (capped),
- * resetting to 1min after a quiet gap. State lives in Deno KV.
+ * Recipients depend on the channel:
+ * - a thread → its `joined` participants (the design's notification scope).
+ *   Archived threads have no joined participants, so they notify no one.
+ * - the main channel → every home member.
+ * The author is always excluded. To avoid flooding an active conversation,
+ * each (channel, user) pair has an exponential backoff: 1min → 2min → 4min
+ * (capped), resetting after a quiet gap. State lives in Deno KV.
  */
 
-import { getHome, getThread, getUser, listMembers } from "@scope/db";
+import { getHome, getUser, joinedUserIds, listMembers } from "@scope/db";
 import { getKv as kv } from "./kv.ts";
 import { RP_ORIGIN, sendToUsers } from "./push_send.ts";
 
@@ -41,11 +44,11 @@ export function nextBackoff(
 }
 
 async function passesBackoff(
-  threadId: string,
+  channelKey: string,
   userId: string,
 ): Promise<boolean> {
   const store = await kv();
-  const key = ["notify-backoff", threadId, userId];
+  const key = ["notify-backoff", channelKey, userId];
   const current = (await store.get<BackoffState>(key)).value;
   const { send, next } = nextBackoff(current, Date.now());
   if (send) await store.set(key, next, { expireIn: CAP_MS * 4 });
@@ -60,36 +63,46 @@ const excerpt = (body: string): string => {
 
 /**
  * Notify a new message's recipients. Fire-and-forget friendly: never throws.
- * Recipients are the home's members other than the author, gated by backoff.
+ * For a thread, recipients are its joined participants; for the main channel
+ * (no `threadId`), every home member. The author is excluded; each recipient
+ * is gated by backoff.
  */
 export async function notifyNewMessage(
-  input: { threadId: string; authorId: string; body: string },
+  input: {
+    homeId: string;
+    threadId?: string | null;
+    authorId: string;
+    body: string;
+  },
 ): Promise<void> {
   try {
-    const thread = await getThread(input.threadId);
-    if (!thread) return;
-    const [home, members, author] = await Promise.all([
-      getHome(thread.homeId),
-      listMembers(thread.homeId),
+    const [home, author] = await Promise.all([
+      getHome(input.homeId),
       getUser(input.authorId),
     ]);
     if (!home) return;
 
-    const candidates = members
-      .map((m) => m.userId)
-      .filter((id) => id !== input.authorId);
+    const audience = input.threadId
+      ? await joinedUserIds(input.threadId)
+      : (await listMembers(input.homeId)).map((m) => m.userId);
+    const candidates = audience.filter((id) => id !== input.authorId);
 
+    const channelKey = input.threadId ?? `home:${input.homeId}`;
     const recipients: string[] = [];
     for (const userId of candidates) {
-      if (await passesBackoff(input.threadId, userId)) recipients.push(userId);
+      if (await passesBackoff(channelKey, userId)) recipients.push(userId);
     }
     if (recipients.length === 0) return;
+
+    const url = input.threadId
+      ? `${RP_ORIGIN}/home/${input.homeId}/thread/${input.threadId}`
+      : `${RP_ORIGIN}/home/${input.homeId}`;
 
     await sendToUsers(recipients, {
       title: home.name,
       body: `${author?.displayName ?? "誰か"}: ${excerpt(input.body)}`,
-      url: `${RP_ORIGIN}/homes`,
-      tag: input.threadId,
+      url,
+      tag: channelKey,
     });
   } catch (error) {
     console.warn("[notify] failed", error);

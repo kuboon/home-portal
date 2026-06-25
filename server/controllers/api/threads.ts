@@ -178,6 +178,11 @@ export const threadsController = {
           body: body.body ?? "",
         });
         await signalMainChannel(homeId);
+        await notifyNewMessage({
+          homeId,
+          authorId: userId,
+          body: message.body,
+        });
         return Response.json({ message }, { status: 201 });
       } catch (error) {
         return handleError(error);
@@ -216,6 +221,11 @@ export const threadsController = {
           body: body.body,
         });
         await signalMainChannel(homeId);
+        await notifyNewMessage({
+          homeId,
+          authorId: userId,
+          body: message.body,
+        });
         return Response.json({ message }, { status: 201 });
       } catch (error) {
         return handleError(error);
@@ -265,6 +275,7 @@ export const threadsController = {
         });
         await signalThread(threadId);
         await notifyNewMessage({
+          homeId: thread.homeId,
           threadId,
           authorId: userId,
           body: message.body,
@@ -315,6 +326,7 @@ export const threadsController = {
         });
         await signalThread(threadId);
         await notifyNewMessage({
+          homeId: thread.homeId,
           threadId,
           authorId: userId,
           body: message.body,

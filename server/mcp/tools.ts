@@ -145,6 +145,7 @@ export const tools: McpTool[] = [
         });
         await signalThread(threadId);
         await notifyNewMessage({
+          homeId,
           threadId,
           authorId: agentId,
           body: message.body,
@@ -192,6 +193,7 @@ export const tools: McpTool[] = [
         });
         await signalThread(threadId);
         await notifyNewMessage({
+          homeId,
           threadId,
           authorId: agentId,
           body: message.body,
