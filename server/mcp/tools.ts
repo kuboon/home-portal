@@ -13,6 +13,7 @@ import {
   listHomesForUser,
   listMessages,
   listThreads,
+  pickupIntoThread,
   postMessage,
   renameThread,
   repostMessage,
@@ -225,6 +226,44 @@ export const tools: McpTool[] = [
           body: message.body,
         });
         return message;
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "pickup",
+    description:
+      "Pick up (quote) one or more posts into a thread; the originals' authors " +
+      "join the thread as participants.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        threadId: { type: "string" },
+        sourcePostIds: { type: "array", items: { type: "string" } },
+      },
+      required: ["threadId", "sourcePostIds"],
+    },
+    async handler(agentId, args) {
+      const threadId = str(args, "threadId");
+      const homeId = await homeIdOfThread(threadId);
+      await requireMember(homeId, agentId);
+      const ids = args.sourcePostIds;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        throw new ToolError("sourcePostIds (array) is required");
+      }
+      if (!(await checkRepostLimit(agentId))) {
+        throw new ToolError("rate limited");
+      }
+      try {
+        const messages = await pickupIntoThread({
+          homeId,
+          threadId,
+          sourcePostIds: ids.map(String),
+          authorId: agentId,
+        });
+        await signalThread(threadId);
+        return messages;
       } catch (error) {
         return wrap(error);
       }

@@ -45,6 +45,7 @@ export {
   listThreadsForViewer,
   MAX_MESSAGE_LENGTH,
   type Message,
+  pickupIntoThread,
   postMessage,
   type QuoteRef,
   renameThread,

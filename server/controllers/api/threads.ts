@@ -19,6 +19,7 @@ import {
   listMainMessages,
   listMessages,
   listThreadsForViewer,
+  pickupIntoThread,
   postMessage,
   renameThread,
   repostMessage,
@@ -166,14 +167,62 @@ export const threadsController = {
       if (!userId) return unauthorized();
       const { homeId } = context.params;
       if (!(await getRole(homeId, userId))) return forbidden();
-      const body = await context.request.json() as { title?: string };
+      const body = await context.request.json() as {
+        title?: string;
+        sourcePostIds?: string[];
+      };
+      const pickupIds = body.sourcePostIds ?? [];
+      // Pickup-on-create consumes the pickup budget (separate from post limits).
+      if (pickupIds.length > 0 && !(await checkRepostLimit(userId))) {
+        return rateLimited();
+      }
       try {
         const thread = await createThread({
           homeId,
           title: body.title ?? "",
           userId,
         });
+        if (pickupIds.length > 0) {
+          await pickupIntoThread({
+            homeId,
+            threadId: thread.id,
+            sourcePostIds: pickupIds,
+            authorId: userId,
+          });
+        }
         return Response.json({ thread }, { status: 201 });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async pickup(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) {
+        return Response.json({ error: "not found" }, { status: 404 });
+      }
+      if (!(await getRole(thread.homeId, userId))) return forbidden();
+      const body = await context.request.json() as {
+        sourcePostIds?: string[];
+      };
+      if (!body.sourcePostIds?.length) {
+        return Response.json({ error: "sourcePostIds is required" }, {
+          status: 400,
+        });
+      }
+      if (!(await checkRepostLimit(userId))) return rateLimited();
+      try {
+        const messages = await pickupIntoThread({
+          homeId: thread.homeId,
+          threadId,
+          sourcePostIds: body.sourcePostIds,
+          authorId: userId,
+        });
+        await signalThread(threadId);
+        return Response.json({ messages }, { status: 201 });
       } catch (error) {
         return handleError(error);
       }

@@ -14,7 +14,7 @@ import {
   reactionsByMessage,
   type ReactionSummary,
 } from "./reactions.ts";
-import { joinedThreadIds, joinThread } from "./participants.ts";
+import { joinedThreadIds, joinThread, joinThreadMany } from "./participants.ts";
 
 /** Max message length, in characters. */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -424,6 +424,72 @@ export async function repostMessage(
   const message = await getMessage(id);
   if (!message) throw new Error(`repostMessage failed to read back ${id}`);
   return message;
+}
+
+/**
+ * Pick up posts into a thread (the design's "pickup"): each source is reposted
+ * (flattened to its original) into the thread, and the original authors join
+ * as participants alongside the picker. Hidden posts cannot be picked up, and
+ * sources must belong to the thread's home. Returns the created reposts.
+ */
+export async function pickupIntoThread(
+  input: {
+    homeId: string;
+    threadId: string;
+    sourcePostIds: string[];
+    authorId: string;
+  },
+): Promise<Message[]> {
+  if (input.sourcePostIds.length === 0) {
+    throw new HomeError("ピックアップする投稿がありません");
+  }
+  await assertWritable(input.threadId);
+  const client = await db();
+  const created: Message[] = [];
+  const seedAuthors = new Set<string>();
+
+  for (const sourceId of input.sourcePostIds) {
+    const { rows } = await client.execute({
+      sql:
+        "SELECT home_id, author_id, ref_post_id, hidden_at FROM messages WHERE id = ?",
+      args: [sourceId],
+    });
+    const row = rows[0];
+    if (!row) throw new HomeError("source message not found", 404);
+    if (String(row.home_id) !== input.homeId) {
+      throw new HomeError("別ホームの投稿はピックアップできません", 403);
+    }
+    // Hidden (admin-moderated) posts cannot be picked up.
+    if (row.hidden_at != null) {
+      throw new HomeError("非表示の投稿はピックアップできません");
+    }
+    // Flatten to the ultimate original, and seed its author as a participant.
+    const original = row.ref_post_id == null
+      ? sourceId
+      : String(row.ref_post_id);
+    if (original === sourceId) {
+      seedAuthors.add(String(row.author_id));
+    } else {
+      const oa = await client.execute({
+        sql: "SELECT author_id FROM messages WHERE id = ?",
+        args: [original],
+      });
+      if (oa.rows[0]) seedAuthors.add(String(oa.rows[0].author_id));
+    }
+    const id = monotonicUlid();
+    await client.execute({
+      sql:
+        "INSERT INTO messages (id, home_id, thread_id, author_id, body, kind, ref_post_id) " +
+        "VALUES (?, ?, ?, ?, '', 'repost', ?)",
+      args: [id, input.homeId, input.threadId, input.authorId, original],
+    });
+    const m = await getMessage(id);
+    if (m) created.push(m);
+  }
+
+  await touchThread(input.threadId, input.authorId);
+  await joinThreadMany(input.threadId, seedAuthors);
+  return created;
 }
 
 /** Minimal message info for authorization (who/where), or `null`. */
