@@ -28,14 +28,22 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
 
   let userId: string | null = null;
   let jws: string | null = null;
-  const response = await fetchDpop(`${idpOrigin}/session`);
-  if (response.ok) {
-    const data = await response.json() as {
-      userId: string | null;
-      jws?: string;
-    };
-    userId = data.userId ?? null;
-    jws = data.jws ?? null;
+  // Probing the IdP must never sink the whole bootstrap: a network/CORS error
+  // or a non-OK response just means "not signed in". We still return the
+  // `thumbprint` from init() so callers can start the `/authorize` sign-in
+  // flow (it goes into `dpop_jkt`) — that was the whole point of getting here.
+  try {
+    const response = await fetchDpop(`${idpOrigin}/session`);
+    if (response.ok) {
+      const data = await response.json() as {
+        userId: string | null;
+        jws?: string;
+      };
+      userId = data.userId ?? null;
+      jws = data.jws ?? null;
+    }
+  } catch {
+    // Leave userId/jws null → treated as signed-out.
   }
 
   if (userId && jws) {
