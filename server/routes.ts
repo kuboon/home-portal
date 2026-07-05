@@ -9,6 +9,8 @@ export const routes = route({
   homeChat: get("/home/:homeId"),
   /** Chat for a specific thread in a home. */
   homeThread: get("/home/:homeId/thread/:threadId"),
+  /** Per-home PWA manifest so an A2HS icon is named after the home. */
+  homeManifest: get("/home/:homeId/manifest.webmanifest"),
   agents: get("/agents"),
   notifications: get("/notifications"),
   /** Public JWKS so the IdP can verify our RP client assertions. */

@@ -15,7 +15,11 @@ import { homesController } from "./controllers/api/homes.ts";
 import { invitesController } from "./controllers/api/invites.ts";
 import { threadsController } from "./controllers/api/threads.ts";
 import { agentsAction } from "./controllers/agents.tsx";
-import { homeChatAction, homeThreadAction } from "./controllers/chat.tsx";
+import {
+  homeChatAction,
+  homeManifestAction,
+  homeThreadAction,
+} from "./controllers/chat.tsx";
 import { homeAction } from "./controllers/home.tsx";
 import { homesAction } from "./controllers/homes.tsx";
 import { jwksAction } from "./controllers/jwks.ts";
@@ -74,6 +78,7 @@ router.get(routes.signin, signinAction);
 router.get(routes.homes, homesAction);
 router.get(routes.homeChat, homeChatAction);
 router.get(routes.homeThread, homeThreadAction);
+router.get(routes.homeManifest, homeManifestAction);
 router.get(routes.agents, agentsAction);
 router.get(routes.notifications, notificationsAction);
 router.get(routes.jwks, jwksAction);

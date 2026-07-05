@@ -45,15 +45,28 @@ export function renderPage(
  * Render a standalone, full-screen document (no nav shell) hosting a
  * clientEntry. Used for the chat landing page (`/home/:id`), which is a
  * navbar-less app screen rather than a fragment in the shared shell.
+ *
+ * `title` is used both as the document `<title>` and as the iOS
+ * `apple-mobile-web-app-title` so an "add to home screen" icon is labelled
+ * with it (e.g. the home name). `headExtra` lets the caller inject extra
+ * `<head>` nodes such as a per-home `<link rel="manifest">`.
  */
-export function renderBareDocument(title: string, body: RemixNode): Response {
+export function renderBareDocument(
+  title: string,
+  body: RemixNode,
+  headExtra?: RemixNode,
+): Response {
   const doc = (
     <html lang="ja">
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>{title}</title>
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content={title} />
         <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
+        {headExtra}
         <script async type="module" src="/mod.js"></script>
         <link rel="stylesheet" href="/style.css" />
       </head>
