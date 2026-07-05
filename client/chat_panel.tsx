@@ -74,6 +74,7 @@ export const ChatPanel = clientEntry(
     const homeId = handle.props.homeId;
     let ready = false;
     let userId: string | null = null;
+    let thumbprint = "";
     let error = "";
     let homeName = "";
     let role: "admin" | "member" | null = null;
@@ -458,6 +459,7 @@ export const ChatPanel = clientEntry(
           const session = await ensureSession(handle.props.idpOrigin);
           fetchDpop = session.fetchDpop;
           userId = session.userId;
+          thumbprint = session.thumbprint;
           if (userId) {
             await loadHome();
             await loadThreads();
@@ -906,17 +908,37 @@ export const ChatPanel = clientEntry(
       );
     };
 
+    // Redirect straight to the IdP, asking it to return to this same page
+    // (the chat view) once the passkey sign-in completes. The DPoP thumbprint
+    // binds the resulting IdP session to this browser's key.
+    const onSignin = () => {
+      const params = new URLSearchParams({
+        dpop_jkt: thumbprint,
+        redirect_uri: globalThis.location.href,
+      });
+      globalThis.location.href =
+        `${handle.props.idpOrigin}/authorize?${params.toString()}`;
+    };
+
     return () => {
       if (!ready) {
         return <div class="alert alert-soft m-4">読み込み中…</div>;
       }
       if (!userId) {
         return (
-          <div class="alert alert-soft m-4">
-            <span>
-              チャットを使うにはサインインが必要です。{" "}
-              <a class="link" href="/signin">サインイン</a>
-            </span>
+          <div class="hero min-h-[100dvh]">
+            <div class="hero-content text-center">
+              <div>
+                <p class="mb-4">チャットを使うにはサインインが必要です。</p>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  mix={[on("click", onSignin)]}
+                >
+                  パスキーでサインイン
+                </button>
+              </div>
+            </div>
           </div>
         );
       }
