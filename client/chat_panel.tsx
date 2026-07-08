@@ -133,6 +133,14 @@ export const ChatPanel = clientEntry(
     let currentThreadId: string | null = handle.props.threadId || null;
     let messages: Message[] = [];
     let newMessage = "";
+    /** 送信 API の完了待ちの間だけ画面に出す楽観的メッセージ。 */
+    let pendingPosts: {
+      id: string;
+      body: string;
+      createdAt: string;
+      threadId: string | null;
+    }[] = [];
+    let pendingSeq = 0;
     let recentEmojis: string[] = [];
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
@@ -424,18 +432,43 @@ export const ChatPanel = clientEntry(
         applyTheme(themeCss);
       });
 
-    const onPost = () =>
-      run(async () => {
-        const body = newMessage.trim();
-        if (!body) return;
-        await api(`${channelBase()}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
-        });
-        newMessage = "";
-        await loadMessages();
-      });
+    /**
+     * 楽観的送信: 入力欄を即クリアして「送信中」の行をその場で表示し、API
+     * 完了後にサーバの内容へ置き換える。失敗時は行を取り下げ、（新たに入力
+     * が始まっていなければ）本文を入力欄に戻す。
+     */
+    const onPost = () => {
+      const body = newMessage.trim();
+      if (!body || archived()) return;
+      const base = channelBase();
+      const pending = {
+        id: `pending-${++pendingSeq}`,
+        body,
+        // サーバの datetime('now') と同じ UTC "YYYY-MM-DD HH:MM:SS" 形式。
+        createdAt: new Date().toISOString().slice(0, 19).replace("T", " "),
+        threadId: currentThreadId,
+      };
+      newMessage = "";
+      error = "";
+      pendingPosts = [...pendingPosts, pending];
+      handle.update();
+      (async () => {
+        try {
+          await api(`${base}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ body }),
+          });
+          await loadMessages();
+        } catch (e) {
+          error = (e as Error).message;
+          if (!newMessage.trim()) newMessage = body;
+        } finally {
+          pendingPosts = pendingPosts.filter((p) => p.id !== pending.id);
+          handle.update();
+        }
+      })();
+    };
 
     const onEdit = (messageId: string, current: string) =>
       run(async () => {
@@ -542,7 +575,7 @@ export const ChatPanel = clientEntry(
      * Slack/Discord 風のフラットなメッセージ行。`grouped` のとき（直前と同一
      * 著者の連投）はアバター・名前を省き、ホバー時のみ左端に時刻を出す。
      */
-    const messageRow = (m: Message, grouped: boolean) => {
+    const messageRow = (m: Message, grouped: boolean, pending = false) => {
       if (m.kind === "edit") {
         // Forward marker left where the post used to be; the edited version is
         // re-posted at the tail.
@@ -559,14 +592,21 @@ export const ChatPanel = clientEntry(
           key={m.id}
           class={`chat-msg group relative flex gap-3 px-4 py-0.5 hover:bg-base-200/60 ${
             grouped ? "" : "mt-2"
-          }`}
+          } ${pending ? "opacity-60" : ""}`}
         >
           {grouped
             ? (
               <div class="w-9 shrink-0 text-right select-none">
-                <time class="invisible group-hover:visible text-[10px] leading-6 opacity-50">
-                  {fmtTime(m.createdAt)}
-                </time>
+                {pending
+                  ? (
+                    <span class="loading loading-dots loading-xs opacity-50">
+                    </span>
+                  )
+                  : (
+                    <time class="invisible group-hover:visible text-[10px] leading-6 opacity-50">
+                      {fmtTime(m.createdAt)}
+                    </time>
+                  )}
               </div>
             )
             : avatar(m)}
@@ -574,7 +614,13 @@ export const ChatPanel = clientEntry(
             {grouped ? null : (
               <div class="flex items-baseline gap-2 flex-wrap">
                 <span class="font-bold leading-tight">{m.authorName}</span>
-                <time class="text-xs opacity-50">{fmtTime(m.createdAt)}</time>
+                {pending
+                  ? <span class="text-xs opacity-50">送信中…</span>
+                  : (
+                    <time class="text-xs opacity-50">
+                      {fmtTime(m.createdAt)}
+                    </time>
+                  )}
                 {m.hidden
                   ? (
                     <span class="badge badge-warning badge-xs">
@@ -705,7 +751,7 @@ export const ChatPanel = clientEntry(
               : null}
           </div>
           {/* Hover actions in the top-right of the row (Slack/Discord style). */}
-          {m.deleted
+          {m.deleted || pending
             ? null
             : (
               <div class="absolute -top-3 right-4 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex rounded-lg border border-base-300 bg-base-100 shadow-md overflow-hidden">
@@ -768,10 +814,36 @@ export const ChatPanel = clientEntry(
      * メッセージ列（日付区切り + 連投グルーピング）。逆順で返し、コンテナの
      * `flex-col-reverse` と合わせて常に最下部（最新）に張り付くようにする。
      */
+    /** 自分の表示名（楽観的メッセージ用）。既存の自分の投稿から引く。 */
+    const myName = () =>
+      messages.find((m) => m.authorId === userId && m.kind !== "edit")
+        ?.authorName ?? "自分";
+
     const messageList = () => {
+      // 表示中のチャンネル宛ての送信中メッセージを末尾に合成する。
+      const pendingIds = new Set<string>();
+      const all = [...messages];
+      for (const p of pendingPosts) {
+        if (p.threadId !== currentThreadId) continue;
+        pendingIds.add(p.id);
+        all.push({
+          id: p.id,
+          authorId: userId ?? "",
+          authorName: myName(),
+          body: p.body,
+          createdAt: p.createdAt,
+          editedAt: null,
+          kind: "normal",
+          deleted: false,
+          hidden: false,
+          repost: null,
+          quotedIn: [],
+          reactions: [],
+        });
+      }
       const rows: ReturnType<typeof messageRow>[] = [];
       let prev: Message | null = null;
-      for (const m of messages) {
+      for (const m of all) {
         const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
         if (newDay) {
           rows.push(
@@ -787,7 +859,7 @@ export const ChatPanel = clientEntry(
           prev.authorId === m.authorId &&
           parseUtc(m.createdAt).getTime() -
                 parseUtc(prev.createdAt).getTime() < GROUP_WINDOW_MS;
-        rows.push(messageRow(m, grouped));
+        rows.push(messageRow(m, grouped, pendingIds.has(m.id)));
         prev = m;
       }
       return rows.reverse();
@@ -1182,7 +1254,8 @@ export const ChatPanel = clientEntry(
               : null}
 
             <div class="chat-messages flex-1 overflow-y-auto flex flex-col-reverse py-2">
-              {messages.length === 0
+              {messages.length === 0 &&
+                  !pendingPosts.some((p) => p.threadId === currentThreadId)
                 ? (
                   <div class="flex-1 flex items-center justify-center opacity-60">
                     まだメッセージがありません。
