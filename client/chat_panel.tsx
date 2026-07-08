@@ -68,6 +68,57 @@ interface Message {
 const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
 const DRAWER_ID = "chat-drawer";
 
+/** 同一著者の連投をひとまとめに表示する時間幅（Slack/Discord 風）。 */
+const GROUP_WINDOW_MS = 5 * 60 * 1000;
+
+const AVATAR_COLORS = [
+  "bg-red-500",
+  "bg-orange-500",
+  "bg-amber-600",
+  "bg-green-600",
+  "bg-teal-600",
+  "bg-sky-600",
+  "bg-blue-600",
+  "bg-indigo-500",
+  "bg-purple-500",
+  "bg-pink-500",
+] as const;
+
+/** authorId から決定的にアバター色を選ぶ。 */
+function avatarColor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+/** SQLite の datetime('now')（UTC・"YYYY-MM-DD HH:MM:SS"）をパース。 */
+function parseUtc(s: string): Date {
+  return new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+}
+
+function fmtTime(s: string): string {
+  const d = parseUtc(s);
+  return isNaN(d.getTime())
+    ? s
+    : d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDate(s: string): string {
+  const d = parseUtc(s);
+  return isNaN(d.getTime()) ? s : d.toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  });
+}
+
+/** 日付区切り判定用のキー（ローカルタイムゾーンの日単位）。 */
+function dayKey(s: string): string {
+  const d = parseUtc(s);
+  return isNaN(d.getTime()) ? s : d.toDateString();
+}
+
 export const ChatPanel = clientEntry(
   "/chat_panel.js#ChatPanel",
   function ChatPanel(handle: Handle<ChatPanelProps>) {
@@ -100,8 +151,8 @@ export const ChatPanel = clientEntry(
 
     const currentThread = () => threads.find((t) => t.id === currentThreadId);
     const archived = () => !!currentThread()?.archivedAt;
-    const channelTitle = () =>
-      currentThreadId ? (currentThread()?.title ?? "スレッド") : "# メイン";
+    const channelName = () =>
+      currentThreadId ? (currentThread()?.title ?? "スレッド") : "メイン";
     /** API base for the active channel (main channel or a thread). */
     const channelBase = () =>
       currentThreadId
@@ -476,200 +527,324 @@ export const ChatPanel = clientEntry(
       })();
     }
 
-    const messageBubble = (m: Message) => {
+    /** アバター（authorId から決定的な色 + 頭文字）。 */
+    const avatar = (m: Message) => (
+      <div
+        class={`w-9 h-9 mt-0.5 rounded-lg flex items-center justify-center text-white font-bold select-none shrink-0 ${
+          avatarColor(m.authorId)
+        }`}
+      >
+        {(m.authorName || "?").slice(0, 1).toUpperCase()}
+      </div>
+    );
+
+    /**
+     * Slack/Discord 風のフラットなメッセージ行。`grouped` のとき（直前と同一
+     * 著者の連投）はアバター・名前を省き、ホバー時のみ左端に時刻を出す。
+     */
+    const messageRow = (m: Message, grouped: boolean) => {
       if (m.kind === "edit") {
         // Forward marker left where the post used to be; the edited version is
         // re-posted at the tail.
         return (
-          <div class="text-xs italic opacity-50 px-2 py-1">
+          <div key={m.id} class="px-4 py-0.5 pl-16 text-xs italic opacity-50">
             ✏️ {m.authorName} さんがこの投稿を編集しました（最新版は下）
-          </div>
-        );
-      }
-      if (m.deleted) {
-        return (
-          <div class="chat chat-start">
-            <div class="chat-header">{m.authorName}</div>
-            <div class="chat-bubble chat-bubble-neutral italic opacity-60">
-              削除されました
-            </div>
           </div>
         );
       }
       const mine = m.authorId === userId;
       const canDelete = mine || role === "admin";
       return (
-        <div class="chat chat-start group relative">
-          <div class="chat-header">
-            {m.authorName}
-            <time class="text-xs opacity-50 ml-1">{m.createdAt}</time>
-            {m.editedAt
-              ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
-              : null}
-            {m.hidden
+        <div
+          key={m.id}
+          class={`chat-msg group relative flex gap-3 px-4 py-0.5 hover:bg-base-200/60 ${
+            grouped ? "" : "mt-2"
+          }`}
+        >
+          {grouped
+            ? (
+              <div class="w-9 shrink-0 text-right select-none">
+                <time class="invisible group-hover:visible text-[10px] leading-6 opacity-50">
+                  {fmtTime(m.createdAt)}
+                </time>
+              </div>
+            )
+            : avatar(m)}
+          <div class="flex-1 min-w-0">
+            {grouped ? null : (
+              <div class="flex items-baseline gap-2 flex-wrap">
+                <span class="font-bold leading-tight">{m.authorName}</span>
+                <time class="text-xs opacity-50">{fmtTime(m.createdAt)}</time>
+                {m.hidden
+                  ? (
+                    <span class="badge badge-warning badge-xs">
+                      管理者により非表示
+                    </span>
+                  )
+                  : null}
+              </div>
+            )}
+            {m.deleted
               ? (
-                <span class="badge badge-warning badge-xs ml-1">
-                  管理者により非表示
-                </span>
+                <div class="italic opacity-50 leading-relaxed">
+                  このメッセージは削除されました
+                </div>
               )
               : null}
-          </div>
-          <div class={`chat-bubble ${m.hidden ? "opacity-60" : ""}`}>
-            {m.repost
+            {!m.deleted && m.repost
               ? (
-                <div class="border-l-4 border-base-content/20 pl-2 mb-1 text-sm opacity-80">
-                  <span class="font-semibold">{m.repost.authorName}</span>:{" "}
+                <div class="border-l-2 border-base-content/25 pl-3 my-1 text-sm opacity-75">
+                  <span class="font-semibold">{m.repost.authorName}</span>{" "}
                   {m.repost.deleted
                     ? <span class="italic">削除されました</span>
                     : m.repost.body}
                 </div>
               )
               : null}
-            {m.body}
-          </div>
-          {/* Slack/Discord-style hover actions in the top-right of the post. */}
-          <div class="absolute -top-2 right-2 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity join border border-base-300 bg-base-100 shadow-sm">
-            {archived() ? null : (
-              <button
-                type="button"
-                class="btn btn-ghost btn-xs join-item"
-                aria-label="リアクション"
-                mix={[on("click", () => {
-                  paletteFor = paletteFor === m.id ? null : m.id;
-                  handle.update();
-                })]}
-              >
-                😀
-              </button>
-            )}
-            <button
-              type="button"
-              class="btn btn-ghost btn-xs join-item"
-              aria-label="返信"
-              mix={[on("click", () => onPickupToNewThread(m.id))]}
-            >
-              ↩︎
-            </button>
-            {!archived() && mine
+            {!m.deleted
               ? (
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-xs join-item"
-                  aria-label="編集"
-                  mix={[on("click", () => onEdit(m.id, m.body))]}
+                <div
+                  class={`whitespace-pre-wrap break-words leading-relaxed ${
+                    m.hidden ? "opacity-60" : ""
+                  }`}
                 >
-                  ✏️
-                </button>
+                  {m.body}
+                  {m.editedAt
+                    ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
+                    : null}
+                </div>
               )
               : null}
-            {!archived() && canDelete
+            {!m.deleted && m.reactions.length > 0
               ? (
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-xs join-item"
-                  aria-label="削除"
-                  mix={[on("click", () => onDelete(m.id))]}
-                >
-                  🗑
-                </button>
-              )
-              : null}
-          </div>
-          {m.reactions.length > 0 || paletteFor === m.id
-            ? (
-              <div class="chat-footer flex flex-wrap gap-1 mt-1">
-                {m.reactions.map((r) => (
-                  <button
-                    type="button"
-                    class={`badge ${r.mine ? "badge-primary" : "badge-ghost"}`}
-                    disabled={archived()}
-                    mix={[on("click", () => onToggleReaction(m.id, r.emoji))]}
-                  >
-                    {r.emoji} {r.count}
-                  </button>
-                ))}
-                {paletteFor === m.id
-                  ? [...new Set([...recentEmojis, ...DEFAULT_EMOJIS])].map((
-                    e,
-                  ) => (
+                <div class="flex flex-wrap items-center gap-1 mt-1">
+                  {m.reactions.map((r) => (
                     <button
                       type="button"
-                      class="btn btn-xs"
-                      mix={[on("click", () => onToggleReaction(m.id, e))]}
+                      key={r.emoji}
+                      class={`h-6 rounded-full border px-2 text-xs inline-flex items-center gap-1 ${
+                        r.mine
+                          ? "border-primary bg-primary/10"
+                          : "border-base-300 bg-base-200 hover:border-base-content/40"
+                      }`}
+                      disabled={archived()}
+                      mix={[on("click", () => onToggleReaction(m.id, r.emoji))]}
                     >
-                      {e}
+                      <span>{r.emoji}</span>
+                      <span class="font-semibold tabular-nums">{r.count}</span>
                     </button>
-                  ))
-                  : null}
-              </div>
-            )
-            : null}
-          {m.quotedIn.length > 0
-            ? (
-              <div class="chat-footer mt-1">
+                  ))}
+                  {!archived()
+                    ? (
+                      <button
+                        type="button"
+                        class="h-6 rounded-full border border-dashed border-base-content/25 px-2 text-xs opacity-60 hover:opacity-100"
+                        aria-label="リアクションを追加"
+                        mix={[on("click", () => {
+                          paletteFor = paletteFor === m.id ? null : m.id;
+                          handle.update();
+                        })]}
+                      >
+                        +
+                      </button>
+                    )
+                    : null}
+                </div>
+              )
+              : null}
+            {!m.deleted && paletteFor === m.id
+              ? (
+                <div class="mt-1 w-fit flex flex-wrap gap-0.5 rounded-xl border border-base-300 bg-base-100 p-1.5 shadow-lg">
+                  {[...new Set([...recentEmojis, ...DEFAULT_EMOJIS])].map(
+                    (e) => (
+                      <button
+                        type="button"
+                        key={e}
+                        class="btn btn-ghost btn-sm px-1.5 text-lg"
+                        mix={[on("click", () => onToggleReaction(m.id, e))]}
+                      >
+                        {e}
+                      </button>
+                    ),
+                  )}
+                </div>
+              )
+              : null}
+            {m.quotedIn.length > 0
+              ? (
+                <div class="mt-1">
+                  <button
+                    type="button"
+                    class="text-xs opacity-60 hover:opacity-100 hover:underline"
+                    mix={[on("click", () => {
+                      quotesFor = quotesFor === m.id ? null : m.id;
+                      handle.update();
+                    })]}
+                  >
+                    💬 {m.quotedIn.length} 件のスレッドで引用
+                  </button>
+                  {quotesFor === m.id
+                    ? (
+                      <ul class="menu menu-xs bg-base-200 rounded-box mt-1 w-fit">
+                        {m.quotedIn.map((q) => (
+                          <li key={q.threadId}>
+                            <a
+                              mix={[
+                                on("click", () => selectChannel(q.threadId)),
+                              ]}
+                            >
+                              <span class="truncate">{q.title}</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                    : null}
+                </div>
+              )
+              : null}
+          </div>
+          {/* Hover actions in the top-right of the row (Slack/Discord style). */}
+          {m.deleted
+            ? null
+            : (
+              <div class="absolute -top-3 right-4 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex rounded-lg border border-base-300 bg-base-100 shadow-md overflow-hidden">
+                {archived() ? null : (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs rounded-none"
+                    aria-label="リアクション"
+                    title="リアクション"
+                    mix={[on("click", () => {
+                      paletteFor = paletteFor === m.id ? null : m.id;
+                      handle.update();
+                    })]}
+                  >
+                    😀
+                  </button>
+                )}
                 <button
                   type="button"
-                  class="badge badge-ghost badge-sm gap-1"
-                  mix={[on("click", () => {
-                    quotesFor = quotesFor === m.id ? null : m.id;
-                    handle.update();
-                  })]}
+                  class="btn btn-ghost btn-xs rounded-none"
+                  aria-label="スレッドで返信"
+                  title="スレッドで返信"
+                  mix={[on("click", () => onPickupToNewThread(m.id))]}
                 >
-                  💬 {m.quotedIn.length} 件のスレッドで引用
+                  ↩︎
                 </button>
-                {quotesFor === m.id
+                {!archived() && mine
                   ? (
-                    <ul class="menu menu-xs bg-base-200 rounded-box mt-1">
-                      {m.quotedIn.map((q) => (
-                        <li key={q.threadId}>
-                          <a
-                            mix={[on("click", () => selectChannel(q.threadId))]}
-                          >
-                            <span class="truncate">{q.title}</span>
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs rounded-none"
+                      aria-label="編集"
+                      title="編集"
+                      mix={[on("click", () => onEdit(m.id, m.body))]}
+                    >
+                      ✏️
+                    </button>
+                  )
+                  : null}
+                {!archived() && canDelete
+                  ? (
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-xs rounded-none"
+                      aria-label="削除"
+                      title="削除"
+                      mix={[on("click", () => onDelete(m.id))]}
+                    >
+                      🗑
+                    </button>
                   )
                   : null}
               </div>
-            )
-            : null}
+            )}
         </div>
       );
     };
 
-    const threadGroup = (label: string, list: Thread[]) =>
-      list.length === 0 ? [] : [
-        <li key={`title-${label}`} class="menu-title">{label}</li>,
-        ...list.map((t) => (
-          <li key={t.id}>
-            <a
-              class={currentThreadId === t.id ? "active" : ""}
-              mix={[on("click", () => selectChannel(t.id))]}
+    /**
+     * メッセージ列（日付区切り + 連投グルーピング）。逆順で返し、コンテナの
+     * `flex-col-reverse` と合わせて常に最下部（最新）に張り付くようにする。
+     */
+    const messageList = () => {
+      const rows: ReturnType<typeof messageRow>[] = [];
+      let prev: Message | null = null;
+      for (const m of messages) {
+        const newDay = !prev || dayKey(prev.createdAt) !== dayKey(m.createdAt);
+        if (newDay) {
+          rows.push(
+            <div
+              key={`day-${m.id}`}
+              class="divider mx-4 my-1 text-xs opacity-70"
             >
-              <span class="truncate">{t.title}</span>
-            </a>
-          </li>
-        )),
+              {fmtDate(m.createdAt)}
+            </div>,
+          );
+        }
+        const grouped = !newDay && !!prev && prev.kind !== "edit" &&
+          prev.authorId === m.authorId &&
+          parseUtc(m.createdAt).getTime() -
+                parseUtc(prev.createdAt).getTime() < GROUP_WINDOW_MS;
+        rows.push(messageRow(m, grouped));
+        prev = m;
+      }
+      return rows.reverse();
+    };
+
+    /** サイドバーのチャンネル項目（Discord 風）。 */
+    const channelItem = (
+      threadId: string | null,
+      label: string,
+      icon = "#",
+    ) => {
+      const active = currentThreadId === threadId;
+      return (
+        <button
+          type="button"
+          key={threadId ?? "__main__"}
+          class={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+            active
+              ? "bg-base-content/10 font-semibold"
+              : "opacity-70 hover:bg-base-content/5 hover:opacity-100"
+          }`}
+          mix={[on("click", () => selectChannel(threadId))]}
+        >
+          <span class="shrink-0 w-4 text-center opacity-60 font-normal">
+            {icon}
+          </span>
+          <span class="truncate flex-1">{label}</span>
+        </button>
+      );
+    };
+
+    const threadGroup = (label: string, list: Thread[], icon = "#") =>
+      list.length === 0 ? [] : [
+        <div
+          key={`title-${label}`}
+          class="px-2 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider opacity-50"
+        >
+          {label}
+        </div>,
+        ...list.map((t) => channelItem(t.id, t.title, icon)),
       ];
 
     const sidebar = () => (
-      <aside class="bg-base-200 w-72 min-h-full flex flex-col">
-        <div class="p-3 border-b border-base-300">
-          <a class="font-bold text-lg link link-hover" href="/homes">
-            {homeName || "ホーム"}
+      <aside class="chat-sidebar bg-base-300 w-72 h-full min-h-full flex flex-col">
+        <div class="h-12 px-4 flex items-center justify-between gap-2 border-b border-base-content/10 shrink-0">
+          <span class="font-bold truncate">{homeName || "ホーム"}</span>
+          <a
+            class="btn btn-ghost btn-xs btn-square opacity-70"
+            href="/homes"
+            aria-label="ホーム一覧へ"
+            title="ホーム一覧へ"
+          >
+            ⌂
           </a>
         </div>
-        <ul class="menu w-full flex-1 overflow-y-auto flex-nowrap">
-          <li>
-            <a
-              class={currentThreadId === null ? "active" : ""}
-              mix={[on("click", () => selectChannel(null))]}
-            >
-              # メイン
-            </a>
-          </li>
+        <nav class="flex-1 overflow-y-auto px-2 py-2">
+          {channelItem(null, "メイン")}
           {threadGroup(
             "参加中",
             threads.filter((t) => !t.archivedAt && t.joined),
@@ -678,16 +853,20 @@ export const ChatPanel = clientEntry(
             "未参加",
             threads.filter((t) => !t.archivedAt && !t.joined),
           )}
-          {threadGroup("アーカイブ", threads.filter((t) => !!t.archivedAt))}
-        </ul>
-        <div class="p-2 border-t border-base-300">
+          {threadGroup(
+            "アーカイブ",
+            threads.filter((t) => !!t.archivedAt),
+            "🗄",
+          )}
+        </nav>
+        <div class="p-2 border-t border-base-content/10 shrink-0">
           <button
             type="button"
-            class="btn btn-ghost btn-sm w-full justify-start"
+            class="btn btn-ghost btn-sm w-full justify-start gap-2"
             aria-label="メニュー"
             mix={[on("click", openSettings)]}
           >
-            ⚙ 設定
+            <span class="opacity-70">⚙</span> 設定
           </button>
         </div>
       </aside>
@@ -841,7 +1020,7 @@ export const ChatPanel = clientEntry(
           <textarea
             class="textarea textarea-bordered font-mono text-sm w-full"
             rows={4}
-            placeholder=".chat-bubble { background: #fde; }"
+            placeholder=".chat-msg:hover { background: #fde; }"
             value={themeDraft}
             mix={[on<HTMLTextAreaElement>("input", (e) => {
               themeDraft = (e.target as HTMLTextAreaElement).value;
@@ -946,16 +1125,21 @@ export const ChatPanel = clientEntry(
         <div class="drawer lg:drawer-open h-[100dvh]">
           {settingsOpen ? settingsOverlay() : null}
           <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
-          <div class="drawer-content flex flex-col min-w-0">
-            <div class="flex items-center gap-2 p-2 border-b border-base-300">
+          <div class="drawer-content flex flex-col min-w-0 h-full">
+            <header class="h-12 flex items-center gap-2 px-3 border-b border-base-300 shadow-sm shrink-0">
               <label
                 for={DRAWER_ID}
-                class="btn btn-ghost btn-sm drawer-button lg:hidden"
+                class="btn btn-ghost btn-sm btn-square drawer-button lg:hidden"
                 aria-label="スレッド一覧"
               >
                 ☰
               </label>
-              <h2 class="font-bold truncate flex-1">{channelTitle()}</h2>
+              <h2 class="font-bold truncate flex-1">
+                <span class="opacity-40 font-normal mr-1">
+                  {currentThreadId ? "🧵" : "#"}
+                </span>
+                {channelName()}
+              </h2>
               {currentThreadId &&
                   (currentThread()?.createdBy === userId || role === "admin")
                 ? (
@@ -987,7 +1171,7 @@ export const ChatPanel = clientEntry(
                   </button>
                 )
                 : null}
-            </div>
+            </header>
 
             {error
               ? (
@@ -997,10 +1181,14 @@ export const ChatPanel = clientEntry(
               )
               : null}
 
-            <div class="flex-1 overflow-y-auto p-4 space-y-2">
+            <div class="chat-messages flex-1 overflow-y-auto flex flex-col-reverse py-2">
               {messages.length === 0
-                ? <p class="opacity-60">まだメッセージがありません。</p>
-                : messages.map(messageBubble)}
+                ? (
+                  <div class="flex-1 flex items-center justify-center opacity-60">
+                    まだメッセージがありません。
+                  </div>
+                )
+                : messageList()}
             </div>
 
             {archived()
@@ -1012,23 +1200,45 @@ export const ChatPanel = clientEntry(
                 </div>
               )
               : (
-                <div class="join p-2 border-t border-base-300">
-                  <input
-                    class="input input-bordered join-item flex-1"
-                    placeholder={`${channelTitle()} にメッセージを送信`}
-                    value={newMessage}
-                    mix={[on<HTMLInputElement>("input", (e) => {
-                      newMessage = (e.target as HTMLInputElement).value;
-                      handle.update();
-                    })]}
-                  />
-                  <button
-                    type="button"
-                    class="btn btn-primary join-item"
-                    mix={[on("click", onPost)]}
-                  >
-                    送信
-                  </button>
+                <div class="chat-composer px-3 pb-3 pt-1 shrink-0">
+                  <div class="flex items-center gap-1 rounded-xl border border-base-300 bg-base-100 px-2 py-1 shadow-sm focus-within:border-base-content/40 transition-colors">
+                    <input
+                      class="flex-1 min-w-0 bg-transparent border-0 outline-none px-2 py-2"
+                      placeholder={`#${channelName()} へメッセージを送信`}
+                      value={newMessage}
+                      mix={[
+                        on<HTMLInputElement>("input", (e) => {
+                          newMessage = (e.target as HTMLInputElement).value;
+                          handle.update();
+                        }),
+                        on("keydown", (e) => {
+                          // IME 変換確定の Enter（isComposing）では送信しない。
+                          if (e.key === "Enter" && !e.isComposing) {
+                            e.preventDefault();
+                            onPost();
+                          }
+                        }),
+                      ]}
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-primary btn-sm btn-circle"
+                      aria-label="送信"
+                      title="送信"
+                      disabled={!newMessage.trim()}
+                      mix={[on("click", onPost)]}
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path d="M3.4 20.4l17.4-7.5c.8-.35.8-1.45 0-1.8L3.4 3.6c-.66-.29-1.39.2-1.39.91l-.01 4.61c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               )}
           </div>
