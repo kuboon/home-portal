@@ -144,6 +144,14 @@ export const ChatPanel = clientEntry(
     let recentEmojis: string[] = [];
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
+    // 長押しで開くコンテキストメニュー（ボトムシート）。
+    let menuFor: string | null = null;
+    let menuOpenedAt = 0;
+    // 長押し検出（touch）用のローカル状態。
+    let lpTimer: ReturnType<typeof setTimeout> | null = null;
+    let lpStartX = 0;
+    let lpStartY = 0;
+    let lpFired = false;
     let fetchDpop: FetchDpop | null = null;
     let streamAbort: AbortController | null = null;
     // Settings overlay + per-home management.
@@ -187,6 +195,25 @@ export const ChatPanel = clientEntry(
       if (typeof document === "undefined") return;
       const cb = document.getElementById(DRAWER_ID) as HTMLInputElement | null;
       if (cb) cb.checked = false;
+    };
+
+    const openMenu = (id: string) => {
+      menuFor = id;
+      menuOpenedAt = Date.now();
+      paletteFor = null;
+      quotesFor = null;
+      handle.update();
+    };
+    const closeMenu = () => {
+      if (menuFor === null) return;
+      menuFor = null;
+      handle.update();
+    };
+    const clearLongPress = () => {
+      if (lpTimer !== null) {
+        clearTimeout(lpTimer);
+        lpTimer = null;
+      }
     };
 
     const api = async (path: string, init?: RequestInit): Promise<unknown> => {
@@ -587,12 +614,51 @@ export const ChatPanel = clientEntry(
       }
       const mine = m.authorId === userId;
       const canDelete = mine || role === "admin";
+      // 長押しでコンテキストメニューを開く（実メッセージのみ）。10px 以上
+      // 動いたらスクロール扱いでキャンセル。発火後の合成 click は touchend の
+      // preventDefault と scrim 側の時間ガードの二重で握り潰す。ハンドラは
+      // `mix` に直接書く（`on` の型は載せる要素から推論されるため、配列に
+      // 切り出すと target が Element になり touch イベントが解決されない）。
+      const actionable = !pending && !m.deleted;
       return (
         <div
           key={m.id}
           class={`chat-msg group relative flex gap-3 px-4 py-0.5 hover:bg-base-200/60 ${
             grouped ? "" : "mt-2"
           } ${pending ? "opacity-60" : ""}`}
+          mix={actionable
+            ? [
+              on("touchstart", (e) => {
+                const t = e.touches[0];
+                if (!t) return;
+                lpStartX = t.clientX;
+                lpStartY = t.clientY;
+                lpFired = false;
+                clearLongPress();
+                lpTimer = setTimeout(() => {
+                  lpTimer = null;
+                  lpFired = true;
+                  openMenu(m.id);
+                }, 450);
+              }),
+              on("touchmove", (e) => {
+                const t = e.touches[0];
+                if (!t) return;
+                if (
+                  Math.abs(t.clientX - lpStartX) > 10 ||
+                  Math.abs(t.clientY - lpStartY) > 10
+                ) clearLongPress();
+              }),
+              on("touchend", (e) => {
+                clearLongPress();
+                if (lpFired) {
+                  lpFired = false;
+                  e.preventDefault();
+                }
+              }),
+              on("touchcancel", () => clearLongPress()),
+            ]
+            : []}
         >
           {grouped
             ? (
@@ -1174,6 +1240,101 @@ export const ChatPanel = clientEntry(
       );
     };
 
+    /**
+     * 長押しで開くコンテキストメニュー（下からせり上がるボトムシート）。
+     * リアクション・返信・編集・削除を 1 か所に集約する。scrim は開いた
+     * 直後（合成 click 対策の時間ガード内）はクリックを無視する。
+     */
+    const contextSheet = () => {
+      const m = messages.find((x) => x.id === menuFor);
+      if (!m || m.deleted || m.kind === "edit") return null;
+      const mine = m.authorId === userId;
+      const canDelete = mine || role === "admin";
+      const emojis = [...new Set([...recentEmojis, ...DEFAULT_EMOJIS])].slice(
+        0,
+        6,
+      );
+      const act = (fn: () => void) => {
+        closeMenu();
+        fn();
+      };
+      return (
+        <div
+          class="fixed inset-0 z-40 flex flex-col justify-end"
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            class="context-scrim absolute inset-0 bg-black/40"
+            aria-label="閉じる"
+            mix={[on("click", () => {
+              if (Date.now() - menuOpenedAt < 500) return;
+              closeMenu();
+            })]}
+          >
+          </button>
+          <div class="context-sheet relative w-full max-w-md mx-auto bg-base-100 rounded-t-2xl shadow-2xl pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <div class="flex justify-center pt-2 pb-1">
+              <div class="h-1 w-10 rounded-full bg-base-content/20"></div>
+            </div>
+            {archived()
+              ? null
+              : (
+                <div class="flex justify-around gap-1 px-3 py-2">
+                  {emojis.map((e) => (
+                    <button
+                      type="button"
+                      key={e}
+                      class="w-11 h-11 rounded-full text-2xl flex items-center justify-center hover:bg-base-200 active:bg-base-300"
+                      mix={[
+                        on("click", () => act(() => onToggleReaction(m.id, e))),
+                      ]}
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+            <ul class="menu w-full text-base pb-1">
+              <li>
+                <a
+                  mix={[
+                    on("click", () => act(() => onPickupToNewThread(m.id))),
+                  ]}
+                >
+                  <span class="w-6 text-center">↩︎</span> スレッドで返信
+                </a>
+              </li>
+              {!archived() && mine
+                ? (
+                  <li>
+                    <a
+                      mix={[on("click", () => act(() => onEdit(m.id, m.body)))]}
+                    >
+                      <span class="w-6 text-center">✏️</span> メッセージを編集
+                    </a>
+                  </li>
+                )
+                : null}
+              {!archived() && canDelete
+                ? (
+                  <li>
+                    <a
+                      class="text-error"
+                      mix={[on("click", () => act(() => onDelete(m.id)))]}
+                    >
+                      <span class="w-6 text-center">🗑</span> 削除
+                    </a>
+                  </li>
+                )
+                : null}
+            </ul>
+          </div>
+        </div>
+      );
+    };
+
     // Redirect straight to the IdP, asking it to return to this same page
     // (the chat view) once the passkey sign-in completes. The DPoP thumbprint
     // binds the resulting IdP session to this browser's key.
@@ -1211,6 +1372,7 @@ export const ChatPanel = clientEntry(
       return (
         <div class="drawer lg:drawer-open h-[100dvh]">
           {settingsOpen ? settingsOverlay() : null}
+          {menuFor ? contextSheet() : null}
           <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
           <div class="drawer-content flex flex-col min-w-0 h-full">
             <header class="h-12 flex items-center gap-2 px-3 border-b border-base-300 shadow-sm shrink-0">

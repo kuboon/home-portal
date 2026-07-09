@@ -21,4 +21,29 @@
     border-radius: 0.25rem;
     font-size: 0.9em;
   }
+
+  /* タッチ端末では長押しがテキスト選択や iOS の callout を起こさないように
+     する（長押し＝コンテキストメニューに割り当てるため）。マウス端末では
+     従来どおりテキスト選択できる。 */
+  @media (hover: none) {
+    .chat-msg {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+  }
+}
+
+/* 長押しで開くコンテキストメニューを下からせり上がらせる。 */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.context-sheet {
+  animation: sheet-up 0.18s ease-out;
 }
