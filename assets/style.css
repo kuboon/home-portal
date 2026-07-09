@@ -21,16 +21,28 @@
     border-radius: 0.25rem;
     font-size: 0.9em;
   }
+}
 
-  /* タッチ端末では長押しがテキスト選択や iOS の callout を起こさないように
-     する（長押し＝コンテキストメニューに割り当てるため）。マウス端末では
-     従来どおりテキスト選択できる。 */
-  @media (hover: none) {
-    .chat-msg {
-      -webkit-user-select: none;
-      user-select: none;
-      -webkit-touch-callout: none;
-    }
+/* タッチ端末ではアプリのように全域を選択不可にする（長押しは
+   コンテキストメニュー等に割り当てるため、テキスト選択や iOS Safari の
+   callout を出さない）。ただし入力欄と、コピーしたい招待コード等の
+   <code> は選択可のまま残す。マウス端末（hover: hover）では従来どおり
+   選択できる。@layer の外に置き、iOS Safari が確実に抑止するよう
+   !important を付ける。 */
+@media (hover: none) {
+  body {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+  }
+
+  input,
+  textarea,
+  [contenteditable="true"],
+  code {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+    -webkit-touch-callout: default !important;
   }
 }
 
