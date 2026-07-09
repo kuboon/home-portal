@@ -202,6 +202,11 @@ export const ChatPanel = clientEntry(
       menuOpenedAt = Date.now();
       paletteFor = null;
       quotesFor = null;
+      // 長押しとほぼ同時に iOS Safari が始めてしまうテキスト選択を打ち消す
+      // （CSS の user-select:none と合わせた保険）。
+      try {
+        globalThis.getSelection?.()?.removeAllRanges();
+      } catch { /* no-op */ }
       handle.update();
     };
     const closeMenu = () => {
@@ -518,17 +523,55 @@ export const ChatPanel = clientEntry(
         await loadMessages();
       });
 
-    const onToggleReaction = (messageId: string, emoji: string) =>
-      run(async () => {
-        paletteFor = null;
-        await api(`/api/messages/${messageId}/reactions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ emoji }),
-        });
-        await loadMessages();
-        await loadRecentEmojis();
+    /**
+     * ローカルの messages にリアクションのトグルを即時反映する（楽観的更新）。
+     * サーバの真実はあとで loadMessages() が上書きする。
+     */
+    const applyReactionLocally = (messageId: string, emoji: string) => {
+      messages = messages.map((m) => {
+        if (m.id !== messageId) return m;
+        const rs = m.reactions.map((r) => ({ ...r }));
+        const idx = rs.findIndex((r) => r.emoji === emoji);
+        if (idx >= 0) {
+          const r = rs[idx];
+          if (r.mine) {
+            r.count -= 1;
+            r.mine = false;
+            if (r.count <= 0) rs.splice(idx, 1);
+          } else {
+            r.count += 1;
+            r.mine = true;
+          }
+        } else {
+          rs.push({ emoji, count: 1, mine: true });
+        }
+        return { ...m, reactions: rs };
       });
+    };
+
+    // 送信メッセージと同じく楽観的に先行反映し、往復後に loadMessages() で
+    // サーバの内容へ整合させる（失敗時もサーバ状態に戻るので巻き戻し不要）。
+    const onToggleReaction = (messageId: string, emoji: string) => {
+      paletteFor = null;
+      applyReactionLocally(messageId, emoji);
+      error = "";
+      handle.update();
+      (async () => {
+        try {
+          await api(`/api/messages/${messageId}/reactions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ emoji }),
+          });
+        } catch (e) {
+          error = (e as Error).message;
+        } finally {
+          await loadMessages();
+          await loadRecentEmojis();
+          handle.update();
+        }
+      })();
+    };
 
     if (typeof document !== "undefined") {
       // Right-swipe from the left edge opens the drawer; left-swipe closes it.
