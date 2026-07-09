@@ -820,11 +820,26 @@ export const ChatPanel = clientEntry(
         ?.authorName ?? "自分";
 
     const messageList = () => {
-      // 表示中のチャンネル宛ての送信中メッセージを末尾に合成する。
+      // 表示中のチャンネル宛ての送信中メッセージを末尾に合成する。SSE の
+      // 再取得が POST 完了より先に同じ投稿をサーバから持ってきた場合は、
+      // その分の送信中行を隠して一瞬の二重表示を防ぐ（本文が一致し時刻が
+      // 近い自分の実メッセージ 1 件につき送信中行 1 件を消費する）。
       const pendingIds = new Set<string>();
       const all = [...messages];
+      const consumed = new Set<string>();
       for (const p of pendingPosts) {
         if (p.threadId !== currentThreadId) continue;
+        const real = messages.find((m) =>
+          !consumed.has(m.id) && m.authorId === userId &&
+          m.kind === "normal" && !m.deleted && m.body === p.body &&
+          Math.abs(
+              parseUtc(m.createdAt).getTime() - parseUtc(p.createdAt).getTime(),
+            ) < 60_000
+        );
+        if (real) {
+          consumed.add(real.id);
+          continue;
+        }
         pendingIds.add(p.id);
         all.push({
           id: p.id,
@@ -1299,7 +1314,13 @@ export const ChatPanel = clientEntry(
                       aria-label="送信"
                       title="送信"
                       disabled={!newMessage.trim()}
-                      mix={[on("click", onPost)]}
+                      mix={[
+                        // タップ/クリックで入力欄からフォーカスを奪わない
+                        // （スマホのキーボードが閉じないように）。click は
+                        // pointerdown を打ち消しても発火する。
+                        on("pointerdown", (e) => e.preventDefault()),
+                        on("click", onPost),
+                      ]}
                     >
                       <svg
                         width="16"
