@@ -24,12 +24,15 @@
 }
 
 /* タッチ端末では長押しがテキスト選択や iOS Safari の callout を起こさない
-   ようにする（長押し＝コンテキストメニューに割り当てるため）。マウス端末
-   （hover: hover）では従来どおりテキスト選択できる。@layer の外に置き、
-   iOS Safari が確実に選択を抑止するよう !important を付ける。 */
+   ようにする（長押し＝コンテキストメニューに割り当てるため）。メッセージ
+   の隙間（行間マージンやリストの padding）はコンテナ側の領域なので、
+   .chat-msg だけでなくメッセージリスト全体（.chat-messages の配下）に
+   当てないと、その隙間を起点にした長押しで選択が始まってしまう。マウス
+   端末（hover: hover）では従来どおりテキスト選択できる。@layer の外に
+   置き、iOS Safari が確実に選択を抑止するよう !important を付ける。 */
 @media (hover: none) {
-  .chat-msg,
-  .chat-msg * {
+  .chat-messages,
+  .chat-messages * {
     -webkit-user-select: none !important;
     user-select: none !important;
     -webkit-touch-callout: none !important;
