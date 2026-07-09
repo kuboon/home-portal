@@ -12,6 +12,7 @@ import {
   on,
   type SerializableValue,
 } from "@remix-run/ui";
+import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
 
 export interface HomesPanelProps {
@@ -47,8 +48,15 @@ export const HomesPanel = clientEntry(
     let fetchDpop: FetchDpop | null = null;
     let inviteToken: string | null = null;
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
+    let inviteCopied = false;
     let joinCode = "";
     let themeDraft = "";
+
+    /** The shareable invite URL for the current token. */
+    const inviteUrl = () =>
+      inviteToken && typeof location !== "undefined"
+        ? `${location.origin}/join/${inviteToken}`
+        : "";
 
     /** Inject the selected home's custom CSS into a dedicated <style>. */
     const applyTheme = (css: string) => {
@@ -129,7 +137,20 @@ export const HomesPanel = clientEntry(
         inviteTimer = null;
       }
       inviteToken = null;
+      inviteCopied = false;
     };
+
+    const onCopyInvite = () =>
+      run(async () => {
+        const url = inviteUrl();
+        if (!url) return;
+        try {
+          await navigator.clipboard.writeText(url);
+          inviteCopied = true;
+        } catch {
+          inviteCopied = false;
+        }
+      });
 
     const onSelect = (homeId: string) =>
       run(async () => {
@@ -161,6 +182,7 @@ export const HomesPanel = clientEntry(
           method: "POST",
         }) as { token: string };
         inviteToken = data.token;
+        inviteCopied = false;
         if (inviteTimer !== null) clearInterval(inviteTimer);
         // Keep the token alive while the invite is shown (design: 60s TTL).
         inviteTimer = setInterval(() => {
@@ -318,6 +340,62 @@ export const HomesPanel = clientEntry(
       );
     };
 
+    /** The live invite: URL + scannable QR, valid while this screen is open. */
+    const inviteCard = () => {
+      const url = inviteUrl();
+      const { size, d } = qrPath(url);
+      const margin = 2;
+      const total = size + margin * 2;
+      return (
+        <div class="rounded-box border border-base-300 bg-base-100 p-3 space-y-3 max-w-xs">
+          <p class="text-xs opacity-60">
+            この画面を開いている間だけ有効な招待リンクです。相手のスマホで QR
+            を読み取るか、リンクを共有してください。
+          </p>
+          <div class="flex justify-center">
+            <svg
+              viewBox={`0 0 ${total} ${total}`}
+              class="w-44 h-44 rounded bg-white"
+              shape-rendering="crispEdges"
+              aria-label="招待QRコード"
+            >
+              <path
+                transform={`translate(${margin} ${margin})`}
+                d={d}
+                fill="#000"
+              />
+            </svg>
+          </div>
+          <div class="join w-full">
+            <input
+              class="input input-bordered input-sm join-item flex-1 font-mono text-xs"
+              readonly
+              value={url}
+              mix={[on("focus", (e) => {
+                (e.target as HTMLInputElement).select();
+              })]}
+            />
+            <button
+              type="button"
+              class="btn btn-sm join-item"
+              mix={[on("click", onCopyInvite)]}
+            >
+              {inviteCopied ? "コピー済み ✓" : "コピー"}
+            </button>
+          </div>
+          <div class="text-right">
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              mix={[on("click", onCloseInvite)]}
+            >
+              招待を終了
+            </button>
+          </div>
+        </div>
+      );
+    };
+
     return () => {
       if (!ready) {
         return <div class="alert alert-soft">読み込み中…</div>;
@@ -465,31 +543,15 @@ export const HomesPanel = clientEntry(
                     {selectedRole() === "admin"
                       ? (
                         <div class="mt-2">
-                          {inviteToken
-                            ? (
-                              <div class="alert alert-soft items-center gap-2">
-                                <span class="text-sm">
-                                  招待コード（この画面を開いている間有効）:{" "}
-                                  <code>{inviteToken}</code>
-                                </span>
-                                <button
-                                  type="button"
-                                  class="btn btn-xs"
-                                  mix={[on("click", onCloseInvite)]}
-                                >
-                                  閉じる
-                                </button>
-                              </div>
-                            )
-                            : (
-                              <button
-                                type="button"
-                                class="btn btn-sm btn-outline"
-                                mix={[on("click", onInvite)]}
-                              >
-                                招待コードを発行
-                              </button>
-                            )}
+                          {inviteToken ? inviteCard() : (
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-outline"
+                              mix={[on("click", onInvite)]}
+                            >
+                              招待リンクを発行
+                            </button>
+                          )}
                         </div>
                       )
                       : null}

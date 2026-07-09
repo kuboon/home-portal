@@ -28,6 +28,8 @@
     "npm:daisyui@^5.5.19": "5.5.23",
     "npm:lightningcss@^1.31.1": "1.32.0",
     "npm:magic-string@~0.30.21": "0.30.21",
+    "npm:qrcode-generator@1.4.4": "1.4.4",
+    "npm:qrcode-generator@^1.4.4": "1.4.4",
     "npm:source-map-js@^1.2.1": "1.2.1",
     "npm:tailwindcss@^4.1.18": "4.3.1"
   },
@@ -472,6 +474,9 @@
     "promise-limit@2.7.0": {
       "integrity": "sha512-7nJ6v5lnJsXwGprnGXga4wx6d1POjvi5Qmf1ivTRxTjH4Z/9Czja/UCMLVmB9N93GeWOU93XaFaEt6jbuoagNw=="
     },
+    "qrcode-generator@1.4.4": {
+      "integrity": "sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw=="
+    },
     "source-map-js@1.2.1": {
       "integrity": "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="
     },
@@ -502,7 +507,8 @@
         "dependencies": [
           "jsr:@kuboon/dpop@~0.1.2",
           "npm:@remix-run/fetch-router@0.18.2",
-          "npm:@remix-run/ui@~0.1.1"
+          "npm:@remix-run/ui@~0.1.1",
+          "npm:qrcode-generator@^1.4.4"
         ]
       },
       "packages/db": {

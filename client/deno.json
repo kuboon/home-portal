@@ -7,6 +7,7 @@
   "imports": {
     "@kuboon/dpop": "jsr:@kuboon/dpop@^0.1.2",
     "@remix-run/ui": "npm:@remix-run/ui@^0.1.1",
-    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.18.2"
+    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.18.2",
+    "qrcode-generator": "npm:qrcode-generator@^1.4.4"
   }
 }
