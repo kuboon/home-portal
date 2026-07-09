@@ -11,6 +11,8 @@ export const routes = route({
   homeThread: get("/home/:homeId/thread/:threadId"),
   /** Per-home PWA manifest so an A2HS icon is named after the home. */
   homeManifest: get("/home/:homeId/manifest.webmanifest"),
+  /** Public invite landing page: sign up (if needed) and join the home. */
+  join: get("/join/:token"),
   agents: get("/agents"),
   notifications: get("/notifications"),
   /** Public JWKS so the IdP can verify our RP client assertions. */

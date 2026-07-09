@@ -22,6 +22,7 @@ import {
 } from "./controllers/chat.tsx";
 import { homeAction } from "./controllers/home.tsx";
 import { homesAction } from "./controllers/homes.tsx";
+import { joinAction } from "./controllers/join.tsx";
 import { jwksAction } from "./controllers/jwks.ts";
 import { mcpAction } from "./controllers/mcp.ts";
 import { notificationsAction } from "./controllers/notifications.tsx";
@@ -79,6 +80,7 @@ router.get(routes.homes, homesAction);
 router.get(routes.homeChat, homeChatAction);
 router.get(routes.homeThread, homeThreadAction);
 router.get(routes.homeManifest, homeManifestAction);
+router.get(routes.join, joinAction);
 router.get(routes.agents, agentsAction);
 router.get(routes.notifications, notificationsAction);
 router.get(routes.jwks, jwksAction);

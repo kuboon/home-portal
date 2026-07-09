@@ -11,6 +11,7 @@ const CLIENT_ENTRIES = [
   "signin_card.tsx",
   "homes_panel.tsx",
   "chat_panel.tsx",
+  "join_panel.tsx",
   "notifications_card.tsx",
   "agents_panel.tsx",
 ] as const;
