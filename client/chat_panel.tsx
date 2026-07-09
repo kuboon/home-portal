@@ -338,13 +338,17 @@ export const ChatPanel = clientEntry(
 
     const onPickupToNewThread = (messageId: string) =>
       run(async () => {
-        const title = globalThis.prompt("返信スレッドのタイトル", "");
-        if (title == null || !title.trim()) return;
+        // Title is auto-derived from the first 10 chars of the replied-to post
+        // (editable later), so the reply flow needs no prompt.
+        const src = messages.find((x) => x.id === messageId);
+        const base = (src?.body ?? src?.repost?.body ?? "")
+          .replace(/\s+/g, " ").trim();
+        const title = base.slice(0, 10) || "スレッド";
         const data = await api(`/api/homes/${homeId}/threads`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title: title.trim(),
+            title,
             sourcePostIds: [messageId],
           }),
         }) as { thread: Thread };
