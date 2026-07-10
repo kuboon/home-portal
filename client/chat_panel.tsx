@@ -1531,7 +1531,13 @@ export const ChatPanel = clientEntry(
           {settingsOpen ? settingsOverlay() : null}
           {menuFor ? contextSheet() : null}
           <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
-          <div class="drawer-content flex flex-col min-w-0 h-full">
+          {
+            /* daisyUI の drawer は grid のため、h-full だと grid トラックが
+              中身の高さまで伸びて composer が画面外へ押し出される。ビュー
+              ポート高で固定し、メッセージ一覧を内部スクロールに閉じ込める
+              ことで composer を下端に貼り付ける。 */
+          }
+          <div class="drawer-content flex flex-col min-w-0 h-[100dvh]">
             <header class="h-12 flex items-center gap-2 px-3 border-b border-base-300 shadow-sm shrink-0">
               <label
                 for={DRAWER_ID}
@@ -1587,7 +1593,7 @@ export const ChatPanel = clientEntry(
               )
               : null}
 
-            <div class="chat-messages flex-1 overflow-y-auto flex flex-col-reverse py-2">
+            <div class="chat-messages flex-1 min-h-0 overflow-y-auto flex flex-col-reverse py-2">
               {messages.length === 0 &&
                   !pendingPosts.some((p) => p.threadId === currentThreadId)
                 ? (
