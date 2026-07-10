@@ -68,6 +68,7 @@ interface Message {
 
 const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
 const DRAWER_ID = "chat-drawer";
+const COMPOSER_INPUT_ID = "chat-composer-input";
 
 /** 同一著者の連投をひとまとめに表示する時間幅（Slack/Discord 風）。 */
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
@@ -155,6 +156,9 @@ export const ChatPanel = clientEntry(
     let lpFired = false;
     let fetchDpop: FetchDpop | null = null;
     let streamAbort: AbortController | null = null;
+    // 編集モード: 編集中メッセージ id と、[i] の説明ポップオーバー開閉。
+    let editingId: string | null = null;
+    let editInfoOpen = false;
     // Settings overlay + per-home management.
     let themeCss = "";
     let settingsOpen = false;
@@ -322,6 +326,10 @@ export const ChatPanel = clientEntry(
       run(async () => {
         currentThreadId = threadId;
         paletteFor = null;
+        // 別チャンネルへ移ると編集対象が見えなくなるので編集モードを解除。
+        editingId = null;
+        editInfoOpen = false;
+        newMessage = "";
         if (typeof history !== "undefined") {
           history.pushState({}, "", urlFor(threadId));
         }
@@ -500,6 +508,31 @@ export const ChatPanel = clientEntry(
     const onPost = () => {
       const body = newMessage.trim();
       if (!body || archived()) return;
+      // 編集モード中は当該メッセージを編集（サーバ側で「編集マーク＋末尾に
+      // 新規投稿」になる）。それ以外は通常の楽観的送信。
+      if (editingId) {
+        const id = editingId;
+        editingId = null;
+        editInfoOpen = false;
+        newMessage = "";
+        error = "";
+        handle.update();
+        (async () => {
+          try {
+            await api(`/api/messages/${id}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ body }),
+            });
+          } catch (e) {
+            error = (e as Error).message;
+          } finally {
+            await loadMessages();
+            handle.update();
+          }
+        })();
+        return;
+      }
       const base = channelBase();
       const pending = {
         id: `pending-${++pendingSeq}`,
@@ -530,19 +563,30 @@ export const ChatPanel = clientEntry(
       })();
     };
 
-    const onEdit = (messageId: string, current: string) =>
-      run(async () => {
-        const next = globalThis.prompt("メッセージを編集", current);
-        if (next == null) return;
-        const body = next.trim();
-        if (!body) return;
-        await api(`/api/messages/${messageId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body }),
-        });
-        await loadMessages();
-      });
+    /** Enter edit mode: load the post's body into the composer and focus it. */
+    const onEdit = (messageId: string, current: string) => {
+      editingId = messageId;
+      editInfoOpen = false;
+      newMessage = current;
+      error = "";
+      handle.update();
+      if (typeof document !== "undefined") {
+        setTimeout(() => {
+          const el = document.getElementById(
+            COMPOSER_INPUT_ID,
+          ) as HTMLInputElement | null;
+          el?.focus();
+          el?.setSelectionRange(el.value.length, el.value.length);
+        }, 0);
+      }
+    };
+
+    const cancelEdit = () => {
+      editingId = null;
+      editInfoOpen = false;
+      newMessage = "";
+      handle.update();
+    };
 
     const onDelete = (messageId: string) =>
       run(async () => {
@@ -696,7 +740,9 @@ export const ChatPanel = clientEntry(
           key={m.id}
           class={`chat-msg group relative flex gap-3 px-4 py-0.5 hover:bg-base-200/60 ${
             grouped ? "" : "mt-2"
-          } ${pending ? "opacity-60" : ""}`}
+          } ${pending ? "opacity-60" : ""} ${
+            editingId === m.id ? "bg-warning/15 ring-1 ring-warning/40" : ""
+          }`}
           mix={actionable
             ? [
               on("touchstart", (e) => {
@@ -1485,7 +1531,13 @@ export const ChatPanel = clientEntry(
           {settingsOpen ? settingsOverlay() : null}
           {menuFor ? contextSheet() : null}
           <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
-          <div class="drawer-content flex flex-col min-w-0 h-full">
+          {
+            /* daisyUI の drawer は grid のため、h-full だと grid トラックが
+              中身の高さまで伸びて composer が画面外へ押し出される。ビュー
+              ポート高で固定し、メッセージ一覧を内部スクロールに閉じ込める
+              ことで composer を下端に貼り付ける。 */
+          }
+          <div class="drawer-content flex flex-col min-w-0 h-[100dvh]">
             <header class="h-12 flex items-center gap-2 px-3 border-b border-base-300 shadow-sm shrink-0">
               <label
                 for={DRAWER_ID}
@@ -1541,7 +1593,7 @@ export const ChatPanel = clientEntry(
               )
               : null}
 
-            <div class="chat-messages flex-1 overflow-y-auto flex flex-col-reverse py-2">
+            <div class="chat-messages flex-1 min-h-0 overflow-y-auto flex flex-col-reverse py-2">
               {messages.length === 0 &&
                   !pendingPosts.some((p) => p.threadId === currentThreadId)
                 ? (
@@ -1562,10 +1614,56 @@ export const ChatPanel = clientEntry(
               )
               : (
                 <div class="chat-composer px-3 pb-3 pt-1 shrink-0">
-                  <div class="flex items-center gap-1 rounded-xl border border-base-300 bg-base-100 px-2 py-1 shadow-sm focus-within:border-base-content/40 transition-colors">
+                  {editingId
+                    ? (
+                      <div class="mb-1 px-1">
+                        <div class="flex items-center gap-1 text-sm">
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-xs btn-circle"
+                            aria-label="編集をやめる"
+                            title="編集をやめる"
+                            mix={[on("click", cancelEdit)]}
+                          >
+                            ✕
+                          </button>
+                          <span class="font-semibold">メッセージの編集</span>
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-xs btn-circle"
+                            aria-label="説明"
+                            title="説明"
+                            mix={[on("click", () => {
+                              editInfoOpen = !editInfoOpen;
+                              handle.update();
+                            })]}
+                          >
+                            ⓘ
+                          </button>
+                        </div>
+                        {editInfoOpen
+                          ? (
+                            <div class="mt-1 rounded-lg bg-base-200 p-2 text-xs opacity-80">
+                              編集したメッセージは新規投稿となります。
+                            </div>
+                          )
+                          : null}
+                      </div>
+                    )
+                    : null}
+                  <div
+                    class={`flex items-center gap-1 rounded-xl border bg-base-100 px-2 py-1 shadow-sm transition-colors ${
+                      editingId
+                        ? "border-warning"
+                        : "border-base-300 focus-within:border-base-content/40"
+                    }`}
+                  >
                     <input
+                      id={COMPOSER_INPUT_ID}
                       class="flex-1 min-w-0 bg-transparent border-0 outline-none px-2 py-2"
-                      placeholder={`#${channelName()} へメッセージを送信`}
+                      placeholder={editingId
+                        ? "メッセージを編集…"
+                        : `#${channelName()} へメッセージを送信`}
                       value={newMessage}
                       mix={[
                         on<HTMLInputElement>("input", (e) => {
@@ -1577,6 +1675,9 @@ export const ChatPanel = clientEntry(
                           if (e.key === "Enter" && !e.isComposing) {
                             e.preventDefault();
                             onPost();
+                          } else if (e.key === "Escape" && editingId) {
+                            e.preventDefault();
+                            cancelEdit();
                           }
                         }),
                       ]}
@@ -1584,8 +1685,8 @@ export const ChatPanel = clientEntry(
                     <button
                       type="button"
                       class="btn btn-primary btn-sm btn-circle"
-                      aria-label="送信"
-                      title="送信"
+                      aria-label={editingId ? "更新" : "送信"}
+                      title={editingId ? "更新" : "送信"}
                       disabled={!newMessage.trim()}
                       mix={[
                         // タップ/クリックで入力欄からフォーカスを奪わない

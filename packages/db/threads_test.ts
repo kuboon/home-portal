@@ -135,7 +135,7 @@ Deno.test("edit re-posts at the tail and leaves a forward marker", async () => {
   );
 });
 
-Deno.test("only the author's latest post is editable; delete leaves a tombstone", async () => {
+Deno.test("a non-latest post is editable; delete leaves a tombstone", async () => {
   const home = await setup();
   const thread = await createThread({
     homeId: home.id,
@@ -154,14 +154,23 @@ Deno.test("only the author's latest post is editable; delete leaves a tombstone"
     authorId: "alice",
     body: "2",
   });
-  // `first` is no longer the author's latest → not editable.
-  await assertRejects(() =>
-    editMessage({ messageId: first.id, authorId: "alice", body: "x" })
-  );
+  // `first` is no longer the author's latest, but is still editable: the edit
+  // re-posts at the tail and leaves a forward marker at the old position.
+  const edited = await editMessage({
+    messageId: first.id,
+    authorId: "alice",
+    body: "1-edited",
+  });
+  assertEquals(edited.body, "1-edited");
+  const list = await listMessages(thread.id);
+  const marker = list.find((x) => x.id === first.id)!;
+  assertEquals(marker.kind, "edit");
+  assertEquals(list.at(-1)!.id, edited.id); // new version is at the tail
 
-  await tombstoneMessage(first.id, "alice");
+  const second = list.find((x) => x.body === "2")!;
+  await tombstoneMessage(second.id, "alice");
   const after = await listMessages(thread.id);
-  const m = after.find((x) => x.id === first.id)!;
+  const m = after.find((x) => x.id === second.id)!;
   assertEquals(m.deleted, true);
   assertEquals(m.body, "");
 });
