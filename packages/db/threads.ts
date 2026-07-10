@@ -519,10 +519,10 @@ export async function getMessageContext(
 /**
  * Author edit (forward-repost, per the design): the new content is re-posted
  * at the tail and the old position becomes a forward "edit" marker pointing at
- * the new version (its body is discarded). Only the author's latest live post
- * in the channel can be edited. Every existing reference (reposts, prior edit
- * markers) is re-pointed to the new version, keeping everything flattened to
- * the latest. Returns the new post.
+ * the new version (its body is discarded). Any of the author's live posts can
+ * be edited (not just the latest). Every existing reference (reposts, prior
+ * edit markers) is re-pointed to the new version, keeping everything flattened
+ * to the latest. Returns the new post.
  */
 export async function editMessage(
   input: { messageId: string; authorId: string; body: string },
@@ -548,20 +548,6 @@ export async function editMessage(
   const homeId = String(row.home_id);
   const threadId = row.thread_id == null ? null : String(row.thread_id);
   if (threadId) await assertWritable(threadId);
-
-  // Only the author's latest live post in the channel may be edited. Order by
-  // id (monotonic ULID) rather than created_at, whose second granularity ties.
-  const scope = threadId
-    ? { clause: "thread_id = ?", arg: threadId }
-    : { clause: "home_id = ? AND thread_id IS NULL", arg: homeId };
-  const newer = await client.execute({
-    sql: `SELECT 1 FROM messages WHERE ${scope.clause} AND author_id = ? ` +
-      "AND id > ? AND kind = 'normal' AND tombstone_at IS NULL LIMIT 1",
-    args: [scope.arg, input.authorId, input.messageId],
-  });
-  if (newer.rows.length > 0) {
-    throw new HomeError("最新の投稿のみ編集できます");
-  }
 
   const newId = monotonicUlid();
   await client.batch([
