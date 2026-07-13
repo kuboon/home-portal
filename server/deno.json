@@ -28,6 +28,7 @@
       "env": [
         "IDP_ORIGIN",
         "RP_ORIGIN",
+        "STORAGE_ORIGIN",
         "TURSO_DATABASE_URL",
         "TURSO_AUTH_TOKEN",
         "KV_DEFAULT_PATH"

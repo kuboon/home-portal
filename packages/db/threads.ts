@@ -15,6 +15,7 @@ import {
   type ReactionSummary,
 } from "./reactions.ts";
 import { joinedThreadIds, joinThread, joinThreadMany } from "./participants.ts";
+import { getStamp } from "./stamps.ts";
 
 /** Max message length, in characters. */
 export const MAX_MESSAGE_LENGTH = 4000;
@@ -34,11 +35,22 @@ export interface ThreadForViewer extends Thread {
   joined: boolean;
 }
 
+/** A message's stamp (sticker) reference, resolved for display. */
+export interface StampRef {
+  id: string;
+  label: string;
+  /** storage.kbn.one object key; the client downloads the image with it. */
+  storageKey: string;
+  contentType: string;
+}
+
 /** Summary of the original message a repost references. */
 export interface RepostOf {
   authorName: string;
   body: string;
   deleted: boolean;
+  /** Set when the original is a stamp post. */
+  stamp: StampRef | null;
 }
 
 /** A thread that quotes (reposts) a given post — for the bidirectional link. */
@@ -57,8 +69,8 @@ export interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
-  /** 'normal' post, a 'repost' (quote of an original), or an 'edit' marker. */
-  kind: "normal" | "repost" | "edit";
+  /** 'normal' post, a 'repost', an 'edit' marker, or a 'stamp' (sticker). */
+  kind: "normal" | "repost" | "edit" | "stamp";
   /** Shown as a deletion to the viewer (author tombstone, or hidden to non-admins). */
   deleted: boolean;
   /** Admin moderation: hidden from non-admins. True only when the viewer is an admin. */
@@ -67,6 +79,8 @@ export interface Message {
   repostOf: string | null;
   /** The referenced original's summary when this is a repost. */
   repost: RepostOf | null;
+  /** The stamp when `kind` is 'stamp' (null once deleted for the viewer). */
+  stamp: StampRef | null;
   /** Threads that quote (repost) this post — the bidirectional "quoted in" link. */
   quotedIn: QuoteRef[];
   /** Aggregated reactions (populated by `listMessages`). */
@@ -205,21 +219,39 @@ export async function postMessage(
     /** Omit (or `null`) to post to the home's main channel. */
     threadId?: string | null;
     authorId: string;
-    body: string;
+    body?: string;
+    /** Post this stamp instead of text (kind='stamp'; body becomes its label). */
+    stampId?: string | null;
   },
 ): Promise<Message> {
-  const body = input.body.trim();
-  if (!body) throw new HomeError("message body is required");
-  if (body.length > MAX_MESSAGE_LENGTH) {
-    throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
+  let body = (input.body ?? "").trim();
+  if (input.stampId) {
+    // A stamp post: the body is the stamp's label (alt text). Authorization
+    // (may this user use this stamp here?) is the caller's job.
+    const stamp = await getStamp(input.stampId);
+    if (!stamp) throw new HomeError("stamp not found", 404);
+    body = stamp.label;
+  } else {
+    if (!body) throw new HomeError("message body is required");
+    if (body.length > MAX_MESSAGE_LENGTH) {
+      throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
+    }
   }
   if (input.threadId) await assertWritable(input.threadId);
 
   const id = monotonicUlid();
   await (await db()).execute({
-    sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body) " +
-      "VALUES (?, ?, ?, ?, ?)",
-    args: [id, input.homeId, input.threadId ?? null, input.authorId, body],
+    sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body, " +
+      "kind, stamp_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    args: [
+      id,
+      input.homeId,
+      input.threadId ?? null,
+      input.authorId,
+      body,
+      input.stampId ? "stamp" : "normal",
+      input.stampId ?? null,
+    ],
   });
   // Posting into a thread joins (or re-joins) the author and keeps it active.
   if (input.threadId) await touchThread(input.threadId, input.authorId);
@@ -234,11 +266,16 @@ export async function postMessage(
 const MESSAGE_SELECT =
   "SELECT m.*, COALESCE(mem.display_name, u.display_name) AS display_name, " +
   "o.body AS r_body, o.tombstone_at AS r_tombstone, o.hidden_at AS r_hidden, " +
-  "COALESCE(omem.display_name, ou.display_name) AS r_author " +
+  "COALESCE(omem.display_name, ou.display_name) AS r_author, " +
+  "s.label AS s_label, s.storage_key AS s_key, s.content_type AS s_ctype, " +
+  "os.id AS rs_id, os.label AS rs_label, os.storage_key AS rs_key, " +
+  "os.content_type AS rs_ctype " +
   "FROM messages m " +
   "JOIN users u ON u.id = m.author_id " +
   "LEFT JOIN memberships mem ON mem.home_id = m.home_id AND mem.user_id = m.author_id " +
+  "LEFT JOIN stamps s ON s.id = m.stamp_id " +
   "LEFT JOIN messages o ON o.id = m.ref_post_id " +
+  "LEFT JOIN stamps os ON os.id = o.stamp_id " +
   "LEFT JOIN users ou ON ou.id = o.author_id " +
   "LEFT JOIN memberships omem ON omem.home_id = o.home_id AND omem.user_id = o.author_id";
 
@@ -279,8 +316,25 @@ function rowToMessage(
       authorName: String(row.r_author),
       body: rDeleted ? "" : String(row.r_body),
       deleted: rDeleted,
+      stamp: !rDeleted && row.rs_id != null
+        ? {
+          id: String(row.rs_id),
+          label: String(row.rs_label),
+          storageKey: String(row.rs_key),
+          contentType: String(row.rs_ctype ?? ""),
+        }
+        : null,
     };
   }
+  const stamp: StampRef | null =
+    kind === "stamp" && row.stamp_id != null && !deletedForViewer
+      ? {
+        id: String(row.stamp_id),
+        label: String(row.s_label ?? ""),
+        storageKey: String(row.s_key ?? ""),
+        contentType: String(row.s_ctype ?? ""),
+      }
+      : null;
   return {
     id: String(row.id),
     homeId: String(row.home_id),
@@ -296,6 +350,7 @@ function rowToMessage(
     hidden: hidden && viewerIsAdmin,
     repostOf: refPostId,
     repost,
+    stamp,
     quotedIn: [],
     reactions: [],
   };

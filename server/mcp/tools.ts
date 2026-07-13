@@ -5,12 +5,15 @@
  */
 
 import {
+  canUseStamp,
   createThread,
   getMessageContext,
   getRole,
   getThread,
   HomeError,
   listHomesForUser,
+  listHomeStamps,
+  listLibrary,
   listMessages,
   listThreads,
   pickupIntoThread,
@@ -18,6 +21,7 @@ import {
   renameThread,
   repostMessage,
   toggleReaction,
+  touchStamp,
 } from "@scope/db";
 import { signalThread } from "../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../rate_limit.ts";
@@ -264,6 +268,68 @@ export const tools: McpTool[] = [
         });
         await signalThread(threadId);
         return messages;
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "list_stamps",
+    description:
+      "List stamps (stickers) the agent can post: its own library, or — " +
+      "with homeId — every stamp shared in that home (owned by its members).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        homeId: {
+          type: "string",
+          description: "List the home's shared stamps instead of the library.",
+        },
+      },
+    },
+    async handler(agentId, args) {
+      const homeId = optStr(args, "homeId");
+      if (!homeId) return await listLibrary(agentId);
+      await requireMember(homeId, agentId);
+      return await listHomeStamps(homeId, agentId);
+    },
+  },
+  {
+    name: "post_stamp",
+    description:
+      "Post a stamp (sticker) as a standalone message in a thread. Usable " +
+      "stamps are those in the agent's library or owned by a member of the " +
+      "thread's home; using one adds it to the agent's library (LRU, max 20).",
+    inputSchema: {
+      type: "object",
+      properties: { threadId: { type: "string" }, stampId: { type: "string" } },
+      required: ["threadId", "stampId"],
+    },
+    async handler(agentId, args) {
+      const threadId = str(args, "threadId");
+      const stampId = str(args, "stampId");
+      const homeId = await homeIdOfThread(threadId);
+      await requireMember(homeId, agentId);
+      if (!(await canUseStamp(stampId, agentId, homeId))) {
+        throw new ToolError("stamp not found or not usable in this home");
+      }
+      if (!(await checkPostLimit(agentId))) throw new ToolError("rate limited");
+      try {
+        const message = await postMessage({
+          homeId,
+          threadId,
+          authorId: agentId,
+          stampId,
+        });
+        await touchStamp(agentId, stampId);
+        await signalThread(threadId);
+        await notifyNewMessage({
+          homeId,
+          threadId,
+          authorId: agentId,
+          body: message.body,
+        });
+        return message;
       } catch (error) {
         return wrap(error);
       }

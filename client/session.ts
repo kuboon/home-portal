@@ -21,6 +21,13 @@ export interface Session {
   fetchDpop: FetchDpop;
   thumbprint: string;
   userId: string | null;
+  /**
+   * The IdP's DPoP-bound access token (`jws`), or null when signed out.
+   * Sent as `Authorization: Bearer …` (plus the DPoP proof `fetchDpop` adds)
+   * to other resource servers that verify id.kbn.one users — e.g.
+   * storage.kbn.one's upload/download API for stamp images.
+   */
+  accessToken: string | null;
 }
 
 export async function ensureSession(idpOrigin: string): Promise<Session> {
@@ -57,5 +64,5 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
     }).catch(() => {});
   }
 
-  return { fetchDpop, thumbprint, userId };
+  return { fetchDpop, thumbprint, userId, accessToken: jws };
 }
