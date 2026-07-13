@@ -8,6 +8,7 @@
 import type { Controller } from "@remix-run/fetch-router";
 
 import {
+  canUseStamp,
   createThread,
   editMessage,
   getMessageContext,
@@ -19,12 +20,14 @@ import {
   listMainMessages,
   listMessages,
   listThreadsForViewer,
+  type Message,
   pickupIntoThread,
   postMessage,
   renameThread,
   repostMessage,
   toggleReaction,
   tombstoneMessage,
+  touchStamp,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { notifyNewMessage } from "../../notify.ts";
@@ -64,6 +67,37 @@ function signalChannel(ctx: { homeId: string; threadId: string | null }) {
   return ctx.threadId
     ? signalThread(ctx.threadId)
     : signalMainChannel(ctx.homeId);
+}
+
+/**
+ * Post a text message or a stamp (when `stampId` is set) into a channel.
+ * A stamp must be usable by the author in that home (their library, or owned
+ * by a member — the sharing model); using one refreshes/auto-adds it to the
+ * author's library (LRU). Returns the message, or an error response.
+ */
+async function postToChannel(input: {
+  homeId: string;
+  threadId?: string | null;
+  authorId: string;
+  body?: string;
+  stampId?: string;
+}): Promise<Message | Response> {
+  if (input.stampId) {
+    if (!(await canUseStamp(input.stampId, input.authorId, input.homeId))) {
+      return Response.json({ error: "このスタンプは使えません" }, {
+        status: 403,
+      });
+    }
+  }
+  const message = await postMessage({
+    homeId: input.homeId,
+    threadId: input.threadId,
+    authorId: input.authorId,
+    body: input.body ?? "",
+    stampId: input.stampId,
+  });
+  if (input.stampId) await touchStamp(input.authorId, input.stampId);
+  return message;
 }
 
 /**
@@ -245,13 +279,18 @@ export const threadsController = {
       const { homeId } = context.params;
       if (!(await getRole(homeId, userId))) return forbidden();
       if (!(await checkPostLimit(userId))) return rateLimited();
-      const body = await context.request.json() as { body?: string };
+      const body = await context.request.json() as {
+        body?: string;
+        stampId?: string;
+      };
       try {
-        const message = await postMessage({
+        const message = await postToChannel({
           homeId,
           authorId: userId,
-          body: body.body ?? "",
+          body: body.body,
+          stampId: body.stampId,
         });
+        if (message instanceof Response) return message;
         await signalMainChannel(homeId);
         await notifyNewMessage({
           homeId,
@@ -340,14 +379,19 @@ export const threadsController = {
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
       if (!(await checkPostLimit(userId))) return rateLimited();
-      const body = await context.request.json() as { body?: string };
+      const body = await context.request.json() as {
+        body?: string;
+        stampId?: string;
+      };
       try {
-        const message = await postMessage({
+        const message = await postToChannel({
           homeId: thread.homeId,
           threadId,
           authorId: userId,
-          body: body.body ?? "",
+          body: body.body,
+          stampId: body.stampId,
         });
+        if (message instanceof Response) return message;
         await signalThread(threadId);
         await notifyNewMessage({
           homeId: thread.homeId,

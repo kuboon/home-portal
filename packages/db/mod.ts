@@ -52,10 +52,25 @@ export {
   renameThread,
   repostMessage,
   type RepostOf,
+  type StampRef,
   type Thread,
   type ThreadForViewer,
   tombstoneMessage,
 } from "./threads.ts";
+export {
+  canUseStamp,
+  createStamp,
+  getStamp,
+  type HomeStamp,
+  type LibraryStamp,
+  listHomeStamps,
+  listLibrary,
+  MAX_LIBRARY_STAMPS,
+  MAX_STAMP_LABEL,
+  removeFromLibrary,
+  type Stamp,
+  touchStamp,
+} from "./stamps.ts";
 export {
   joinedUserIds,
   joinThread,

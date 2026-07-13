@@ -18,6 +18,8 @@ import type { routes } from "../routes.ts";
 import { renderBareDocument } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const storageOrigin = Deno.env.get("STORAGE_ORIGIN") ??
+  "https://storage.kbn.one";
 const DEFAULT_TITLE = "home portal (ホムポタ)";
 
 async function chatPage(homeId: string, threadId: string): Promise<Response> {
@@ -25,7 +27,12 @@ async function chatPage(homeId: string, threadId: string): Promise<Response> {
   const title = home?.name ?? DEFAULT_TITLE;
   return renderBareDocument(
     title,
-    <ChatPanel idpOrigin={idpOrigin} homeId={homeId} threadId={threadId} />,
+    <ChatPanel
+      idpOrigin={idpOrigin}
+      storageOrigin={storageOrigin}
+      homeId={homeId}
+      threadId={threadId}
+    />,
     <link
       rel="manifest"
       href={`/home/${encodeURIComponent(homeId)}/manifest.webmanifest`}

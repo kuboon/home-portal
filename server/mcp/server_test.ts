@@ -18,7 +18,15 @@ Deno.test("initialize advertises the tools capability", async () => {
 Deno.test("tools/list includes the core tools", async () => {
   const res = await call("tools/list");
   const names = res.result.tools.map((t: { name: string }) => t.name);
-  for (const n of ["list_homes", "list_threads", "post_message", "react"]) {
+  const core = [
+    "list_homes",
+    "list_threads",
+    "post_message",
+    "react",
+    "list_stamps",
+    "post_stamp",
+  ];
+  for (const n of core) {
     assert(names.includes(n), `missing tool ${n}`);
   }
 });

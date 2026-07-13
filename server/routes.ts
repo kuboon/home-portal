@@ -61,6 +61,16 @@ export const routes = route({
     /** POST /api/invites/:token/accept — join the home (signed-in user). */
     accept: post("/:token/accept"),
   }),
+  stampsApi: route("api", {
+    /** GET /api/stamps — the caller's stamp library (LRU order). */
+    list: get("/stamps"),
+    /** POST /api/stamps — register an uploaded image as a stamp. */
+    create: post("/stamps"),
+    /** DELETE /api/stamps/:stampId — remove from the caller's library. */
+    remove: del("/stamps/:stampId"),
+    /** GET /api/homes/:homeId/stamps — stamps shared in a home (members). */
+    homeStamps: get("/homes/:homeId/stamps"),
+  }),
   threadsApi: route("api", {
     /** GET /api/homes/:homeId/threads — threads in a home (members). */
     list: get("/homes/:homeId/threads"),

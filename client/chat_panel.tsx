@@ -20,9 +20,16 @@ import {
 } from "@remix-run/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
+import {
+  stampImageUrl,
+  type StorageSession,
+  uploadStampImage,
+} from "./storage.ts";
 
 export interface ChatPanelProps {
   idpOrigin: string;
+  /** storage.kbn.one — hosts stamp images (browser-direct upload/download). */
+  storageOrigin: string;
   homeId: string;
   /** Initial thread id from the URL, or "" for the main channel. */
   threadId: string;
@@ -51,6 +58,24 @@ interface Member {
   role: "admin" | "member";
 }
 
+/** A stamp (sticker) as the API returns it. */
+interface Stamp {
+  id: string;
+  ownerId: string;
+  label: string;
+  storageKey: string;
+  contentType: string;
+  /** Only on /api/homes/:homeId/stamps: already in my library? */
+  inLibrary?: boolean;
+}
+
+/** A message's resolved stamp reference. */
+interface StampRef {
+  id: string;
+  label: string;
+  storageKey: string;
+}
+
 interface Message {
   id: string;
   authorId: string;
@@ -58,15 +83,23 @@ interface Message {
   body: string;
   createdAt: string;
   editedAt: string | null;
-  kind: "normal" | "repost" | "edit";
+  kind: "normal" | "repost" | "edit" | "stamp";
   deleted: boolean;
   hidden: boolean;
-  repost: { authorName: string; body: string; deleted: boolean } | null;
+  repost: {
+    authorName: string;
+    body: string;
+    deleted: boolean;
+    stamp: StampRef | null;
+  } | null;
+  stamp: StampRef | null;
   quotedIn: { threadId: string; title: string }[];
   reactions: { emoji: string; count: number; mine: boolean }[];
 }
 
 const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
+/** ライブラリ上限（サーバ側 MAX_LIBRARY_STAMPS と揃える）。 */
+const MAX_LIBRARY_STAMPS = 20;
 const DRAWER_ID = "chat-drawer";
 const COMPOSER_INPUT_ID = "chat-composer-input";
 
@@ -144,6 +177,14 @@ export const ChatPanel = clientEntry(
     }[] = [];
     let pendingSeq = 0;
     let recentEmojis: string[] = [];
+    // スタンプ: 自分のライブラリ / ホーム共有分 / picker の開閉 / blob URL。
+    let accessToken: string | null = null;
+    let myStamps: Stamp[] = [];
+    let homeStamps: Stamp[] = [];
+    let stampPickerOpen = false;
+    let stampUploading = false;
+    const stampUrls = new Map<string, string>();
+    const stampUrlPending = new Set<string>();
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
     // 長押しで開くコンテキストメニュー（ボトムシート）。
@@ -285,6 +326,112 @@ export const ChatPanel = clientEntry(
       recentEmojis = data.emojis;
     };
 
+    const loadStamps = async () => {
+      const [mine, home] = await Promise.all([
+        api("/api/stamps") as Promise<{ stamps: Stamp[] }>,
+        api(`/api/homes/${homeId}/stamps`) as Promise<{ stamps: Stamp[] }>,
+      ]);
+      myStamps = mine.stamps;
+      homeStamps = home.stamps;
+    };
+
+    const storageSession = (): StorageSession | null =>
+      fetchDpop && accessToken
+        ? {
+          fetchDpop,
+          accessToken,
+          storageOrigin: handle.props.storageOrigin,
+        }
+        : null;
+
+    /**
+     * storage.kbn.one の画像の blob URL。未取得ならダウンロードを開始して
+     * いったん null を返し、完了時に re-render する（1 key につき 1 回）。
+     */
+    const stampSrc = (key: string): string | null => {
+      const hit = stampUrls.get(key);
+      if (hit) return hit;
+      const session = storageSession();
+      if (!session || stampUrlPending.has(key)) return null;
+      stampUrlPending.add(key);
+      stampImageUrl(session, key)
+        .then((url) => {
+          stampUrls.set(key, url);
+          handle.update();
+        })
+        .catch(() => {})
+        .finally(() => stampUrlPending.delete(key));
+      return null;
+    };
+
+    /** スタンプ画像（取得中は skeleton）。`cls` でサイズを指定する。 */
+    const stampImg = (key: string, label: string, cls: string) => {
+      const src = stampSrc(key);
+      return src
+        ? <img src={src} alt={label} title={label} class={cls} />
+        : <div class={`skeleton ${cls}`} title={label}></div>;
+    };
+
+    const toggleStampPicker = () => {
+      stampPickerOpen = !stampPickerOpen;
+      handle.update();
+      if (stampPickerOpen) run(loadStamps);
+    };
+
+    /** スタンプを 1 投稿として送信（テキストと同じ投稿枠・経路）。 */
+    const onPostStamp = (stampId: string) => {
+      if (archived()) return;
+      stampPickerOpen = false;
+      error = "";
+      handle.update();
+      (async () => {
+        try {
+          await api(`${channelBase()}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stampId }),
+          });
+          await loadMessages();
+          // 使用で LRU 順・自動追加が変わるのでライブラリも取り直す。
+          await loadStamps();
+        } catch (e) {
+          error = (e as Error).message;
+        } finally {
+          handle.update();
+        }
+      })();
+    };
+
+    /** 画像を storage.kbn.one へ直接アップロードし、スタンプとして登録。 */
+    const onUploadStamp = (file: File) =>
+      run(async () => {
+        const session = storageSession();
+        if (!session) throw new Error("サインインし直してください");
+        stampUploading = true;
+        handle.update();
+        try {
+          const key = await uploadStampImage(session, file);
+          await api("/api/stamps", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              storageKey: key,
+              label: file.name.replace(/\.[^.]+$/, ""),
+              contentType: file.type,
+            }),
+          });
+          await loadStamps();
+        } finally {
+          stampUploading = false;
+        }
+      });
+
+    const onRemoveStamp = (stampId: string) =>
+      run(async () => {
+        await api(`/api/stamps/${stampId}`, { method: "DELETE" });
+        await loadStamps();
+      });
+
     /** Open the active channel's SSE stream; re-fetch messages on each ping. */
     const startStream = (threadId: string | null) => {
       streamAbort?.abort();
@@ -326,6 +473,7 @@ export const ChatPanel = clientEntry(
       run(async () => {
         currentThreadId = threadId;
         paletteFor = null;
+        stampPickerOpen = false;
         // 別チャンネルへ移ると編集対象が見えなくなるので編集モードを解除。
         editingId = null;
         editInfoOpen = false;
@@ -387,6 +535,7 @@ export const ChatPanel = clientEntry(
       run(async () => {
         closeDrawer();
         await loadMembers();
+        await loadStamps();
         nameDraft = members.find((m) => m.userId === userId)?.displayName ??
           userId ?? "";
         themeDraft = themeCss;
@@ -686,6 +835,7 @@ export const ChatPanel = clientEntry(
           fetchDpop = session.fetchDpop;
           userId = session.userId;
           thumbprint = session.thumbprint;
+          accessToken = session.accessToken;
           if (userId) {
             await loadHome();
             await loadThreads();
@@ -826,11 +976,31 @@ export const ChatPanel = clientEntry(
                   <span class="font-semibold">{m.repost.authorName}</span>{" "}
                   {m.repost.deleted
                     ? <span class="italic">削除されました</span>
+                    : m.repost.stamp
+                    ? stampImg(
+                      m.repost.stamp.storageKey,
+                      m.repost.stamp.label,
+                      "h-16 w-16 object-contain mt-1",
+                    )
                     : m.repost.body}
                 </div>
               )
               : null}
-            {!m.deleted
+            {!m.deleted && m.kind === "stamp"
+              ? (
+                // スタンプ投稿: body はラベル（alt 用）なので画像だけを出す。
+                <div class={`my-0.5 ${m.hidden ? "opacity-60" : ""}`}>
+                  {m.stamp
+                    ? stampImg(
+                      m.stamp.storageKey,
+                      m.stamp.label,
+                      "chat-stamp h-32 w-32 object-contain object-left",
+                    )
+                    : <span class="italic opacity-50">{m.body}</span>}
+                </div>
+              )
+              : null}
+            {!m.deleted && m.kind !== "stamp"
               ? (
                 <div
                   class={`whitespace-pre-wrap break-words leading-relaxed ${
@@ -961,7 +1131,7 @@ export const ChatPanel = clientEntry(
                 >
                   ↩︎
                 </button>
-                {!archived() && mine
+                {!archived() && mine && m.kind === "normal"
                   ? (
                     <button
                       type="button"
@@ -1035,6 +1205,7 @@ export const ChatPanel = clientEntry(
           deleted: false,
           hidden: false,
           repost: null,
+          stamp: null,
           quotedIn: [],
           reactions: [],
         });
@@ -1061,6 +1232,136 @@ export const ChatPanel = clientEntry(
         prev = m;
       }
       return rows.reverse();
+    };
+
+    /** picker のスタンプ 1 個（タップで送信）。 */
+    const stampButton = (s: Stamp) => (
+      <button
+        type="button"
+        key={s.id}
+        class="p-1 rounded-lg hover:bg-base-200 active:bg-base-300"
+        title={s.label}
+        aria-label={`スタンプ「${s.label}」を送信`}
+        mix={[on("click", () => onPostStamp(s.id))]}
+      >
+        {stampImg(s.storageKey, s.label, "h-14 w-full object-contain")}
+      </button>
+    );
+
+    /**
+     * スタンプ picker（composer 直上）。自分のライブラリと、ホームのメンバー
+     * が持つ未所持スタンプを並べる。未所持を使うと自分のライブラリに自動追加
+     * される（LRU で押し出し）。
+     */
+    const stampPicker = () => {
+      const homeOnly = homeStamps.filter((s) => !s.inLibrary);
+      return (
+        <div class="mb-1 rounded-xl border border-base-300 bg-base-100 p-2 shadow-lg max-h-72 overflow-y-auto">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold opacity-60">
+              マイスタンプ（{myStamps.length}/{MAX_LIBRARY_STAMPS}）
+            </span>
+            <label
+              class={`btn btn-xs ${stampUploading ? "btn-disabled" : ""}`}
+            >
+              {stampUploading ? "アップロード中…" : "＋ 画像を追加"}
+              <input
+                type="file"
+                accept="image/*"
+                class="hidden"
+                disabled={stampUploading}
+                mix={[on<HTMLInputElement>("change", (e) => {
+                  const input = e.target as HTMLInputElement;
+                  const file = input.files?.[0];
+                  input.value = "";
+                  if (file) onUploadStamp(file);
+                })]}
+              />
+            </label>
+          </div>
+          {myStamps.length === 0
+            ? (
+              <div class="p-2 text-xs opacity-60">
+                まだスタンプがありません。「＋ 画像を追加」から登録できます（2MB
+                まで）。
+              </div>
+            )
+            : (
+              <div class="grid grid-cols-4 sm:grid-cols-6 gap-1 mt-1">
+                {myStamps.map(stampButton)}
+              </div>
+            )}
+          {homeOnly.length > 0
+            ? (
+              <div>
+                <div class="text-xs font-semibold opacity-60 mt-2">
+                  ホームのスタンプ
+                </div>
+                <div class="grid grid-cols-4 sm:grid-cols-6 gap-1 mt-1">
+                  {homeOnly.map(stampButton)}
+                </div>
+              </div>
+            )
+            : null}
+        </div>
+      );
+    };
+
+    /** 設定画面のスタンプライブラリ管理（削除・LRU の可視化）。 */
+    const stampSettings = () => {
+      const full = myStamps.length >= MAX_LIBRARY_STAMPS;
+      return (
+        <div>
+          <label class="text-sm opacity-70">
+            スタンプ（{myStamps.length}/{MAX_LIBRARY_STAMPS}）
+          </label>
+          <p class="text-xs opacity-60">
+            最近使った順に並びます。上限を超えて新しいスタンプを使うと、一番
+            使っていないものから自動的に外れます（画像は消えません）。
+          </p>
+          {myStamps.length === 0
+            ? (
+              <div class="text-xs opacity-50 mt-1">
+                まだスタンプがありません。チャット入力欄の 🎴 から登録できます。
+              </div>
+            )
+            : (
+              <div class="grid grid-cols-4 sm:grid-cols-6 gap-2 mt-2">
+                {myStamps.map((s, i) => (
+                  <div
+                    key={s.id}
+                    class="relative rounded-lg border border-base-300 p-1"
+                  >
+                    {stampImg(
+                      s.storageKey,
+                      s.label,
+                      "h-14 w-full object-contain",
+                    )}
+                    {full && i === myStamps.length - 1
+                      ? (
+                        <span
+                          class="badge badge-warning badge-xs absolute -top-2 left-1"
+                          title="次に新しいスタンプを使うとこれが消えます"
+                        >
+                          !
+                        </span>
+                      )
+                      : null}
+                    <button
+                      type="button"
+                      class="btn btn-xs btn-circle absolute -top-2 -right-2"
+                      aria-label={`「${s.label}」をライブラリから外す`}
+                      title="ライブラリから外す"
+                      mix={[on("click", () => onRemoveStamp(s.id))]}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+        </div>
+      );
     };
 
     /** サイドバーのチャンネル項目（Discord 風）。 */
@@ -1186,10 +1487,10 @@ export const ChatPanel = clientEntry(
                   保存
                 </button>
               </div>
+              <div class="mt-2">{stampSettings()}</div>
               <div class="text-sm opacity-50 mt-2">
-                スタンプの設定（未実装）
+                MCP 連携の設定（未実装）
               </div>
-              <div class="text-sm opacity-50">MCP 連携の設定（未実装）</div>
             </div>
           </div>
 
@@ -1463,7 +1764,7 @@ export const ChatPanel = clientEntry(
                   <span class="w-6 text-center">↩︎</span> スレッドで返信
                 </a>
               </li>
-              {!archived() && mine
+              {!archived() && mine && m.kind === "normal"
                 ? (
                   <li>
                     <a
@@ -1651,6 +1952,7 @@ export const ChatPanel = clientEntry(
                       </div>
                     )
                     : null}
+                  {stampPickerOpen && !editingId ? stampPicker() : null}
                   <div
                     class={`flex items-center gap-1 rounded-xl border bg-base-100 px-2 py-1 shadow-sm transition-colors ${
                       editingId
@@ -1682,6 +1984,24 @@ export const ChatPanel = clientEntry(
                         }),
                       ]}
                     />
+                    {!editingId
+                      ? (
+                        <button
+                          type="button"
+                          class={`btn btn-ghost btn-sm btn-circle ${
+                            stampPickerOpen ? "btn-active" : ""
+                          }`}
+                          aria-label="スタンプ"
+                          title="スタンプ"
+                          mix={[
+                            on("pointerdown", (e) => e.preventDefault()),
+                            on("click", toggleStampPicker),
+                          ]}
+                        >
+                          🎴
+                        </button>
+                      )
+                      : null}
                     <button
                       type="button"
                       class="btn btn-primary btn-sm btn-circle"

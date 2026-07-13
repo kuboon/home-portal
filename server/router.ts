@@ -13,6 +13,7 @@ import { agentsController } from "./controllers/api/agents.ts";
 import { apiController } from "./controllers/api/controller.ts";
 import { homesController } from "./controllers/api/homes.ts";
 import { invitesController } from "./controllers/api/invites.ts";
+import { stampsController } from "./controllers/api/stamps.ts";
 import { threadsController } from "./controllers/api/threads.ts";
 import { agentsAction } from "./controllers/agents.tsx";
 import {
@@ -34,8 +35,12 @@ const kvAccessToken = Deno.env.get("KV_ACCESS_TOKEN");
 if (kvAccessToken) Deno.env.set("DENO_KV_ACCESS_TOKEN", kvAccessToken);
 
 // The IdP origin must be reachable for the browser's DPoP `fetch` (sign-in,
-// session, logout); everything else is same-origin.
+// session, logout). The storage origin hosts stamp images: the browser
+// uploads to and downloads from it directly (DPoP-authenticated fetch), and
+// renders the bytes via blob: URLs. Everything else is same-origin.
 const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const STORAGE_ORIGIN = Deno.env.get("STORAGE_ORIGIN") ??
+  "https://storage.kbn.one";
 
 // Content-Security-Policy is the defence-in-depth partner the theme sanitizer
 // (server/theme.ts) relies on: even if a crafted theme slipped past, `url()`
@@ -45,8 +50,8 @@ const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  `connect-src 'self' ${IDP_ORIGIN}`,
+  "img-src 'self' data: blob:",
+  `connect-src 'self' ${IDP_ORIGIN} ${STORAGE_ORIGIN}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "object-src 'none'",
@@ -89,6 +94,7 @@ router.map(routes.api, apiController);
 router.map(routes.agentsApi, agentsController);
 router.map(routes.homesApi, homesController);
 router.map(routes.invitesApi, invitesController);
+router.map(routes.stampsApi, stampsController);
 router.map(routes.threadsApi, threadsController);
 
 export default router;
