@@ -18,6 +18,7 @@ import {
   on,
   type SerializableValue,
 } from "@remix-run/ui";
+import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
 import {
@@ -25,6 +26,61 @@ import {
   type StorageSession,
   uploadStampImage,
 } from "./storage.ts";
+
+/** ホームごとに A2HS 案内を出したかを覚えるキー（何度も出さないため）。 */
+const a2hsSeenKey = (homeId: string) => `bht_a2hs_seen_${homeId}`;
+
+/**
+ * ホームを開いたとき、まだホーム画面に追加しておらず、追加が可能な環境
+ * （Android の native prompt / iOS Safari 等の手動手順）なら A2HS 案内を
+ * 一度だけポップアップする。各ホームは個別に A2HS する思想なので、案内済み
+ * フラグは homeId 単位で localStorage に保存する。インアプリブラウザや
+ * PC など「追加できない環境」では出さない。
+ */
+function maybePromptA2hs(homeId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (localStorage.getItem(a2hsSeenKey(homeId))) return;
+  } catch { /* localStorage 不可なら案内自体はしてよい */ }
+
+  const controller = createA2hs();
+  const markSeen = () => {
+    try {
+      localStorage.setItem(a2hsSeenKey(homeId), "1");
+    } catch { /* ignore */ }
+  };
+  const show = () => {
+    showA2hsGuide({ controller, onClose: markSeen, onInstalled: markSeen });
+  };
+
+  // `final` の間だけ Android を手動手順にフォールバックさせる。それまでは
+  // beforeinstallprompt（native prompt）の発火を待つ。
+  const decide = (final: boolean): boolean => {
+    const s = controller.getStatus();
+    if (s.support === "installed") return true; // 追加済み → 何もしない
+    if (s.support === "native-prompt") {
+      show();
+      return true;
+    }
+    if (s.support === "manual") {
+      if (s.device.platform === "android" && !final) return false;
+      show();
+      return true;
+    }
+    // in-app-blocked / unsupported は「可能なブラウザ」ではないので出さない。
+    return false;
+  };
+
+  if (decide(false)) return;
+  // Android の beforeinstallprompt は読み込み後に遅れて発火することがある。
+  const off = controller.onChange(() => {
+    if (decide(false)) off();
+  });
+  setTimeout(() => {
+    off();
+    decide(true);
+  }, 2500);
+}
 
 export interface ChatPanelProps {
   idpOrigin: string;
@@ -842,6 +898,8 @@ export const ChatPanel = clientEntry(
             await loadMessages();
             await loadRecentEmojis();
             startStream(currentThreadId);
+            // ホームを開けたら、必要なら A2HS 案内をポップアップ。
+            maybePromptA2hs(homeId);
           }
         } catch (e) {
           error = (e as Error).message;

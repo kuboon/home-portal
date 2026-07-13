@@ -2,6 +2,8 @@
   "version": "5",
   "specifiers": {
     "jsr:@deno/loader@~0.3.11": "0.3.14",
+    "jsr:@kuboon/browser-how-to@*": "0.1.0",
+    "jsr:@kuboon/browser-how-to@0.1": "0.1.0",
     "jsr:@kuboon/dpop@~0.1.1": "0.1.2",
     "jsr:@kuboon/dpop@~0.1.2": "0.1.2",
     "jsr:@kuboon/kv@~0.1.1": "0.1.1",
@@ -36,6 +38,9 @@
   "jsr": {
     "@deno/loader@0.3.14": {
       "integrity": "97bc63a6cc2d27a60bcdc953f588c5213331d866d44212eebb24cebfb9b011ca"
+    },
+    "@kuboon/browser-how-to@0.1.0": {
+      "integrity": "d8aa160f10b7b1e1c0be61d1c841aa25087c9488d8741e05478f8f40fbea535a"
     },
     "@kuboon/dpop@0.1.2": {
       "integrity": "30de96c140e7b23e2ebee0145c75adc9dfe04ecbe288546348bd4b619b733add",
@@ -505,6 +510,7 @@
       },
       "client": {
         "dependencies": [
+          "jsr:@kuboon/browser-how-to@0.1",
           "jsr:@kuboon/dpop@~0.1.2",
           "npm:@remix-run/fetch-router@0.18.2",
           "npm:@remix-run/ui@~0.1.1",
