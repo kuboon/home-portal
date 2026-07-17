@@ -1380,7 +1380,7 @@ export const ChatPanel = clientEntry(
           {myStamps.length === 0
             ? (
               <div class="text-xs opacity-50 mt-1">
-                まだスタンプがありません。チャット入力欄の 🎴 から登録できます。
+                まだスタンプがありません。チャット入力欄のスタンプボタンから登録できます。
               </div>
             )
             : (
@@ -2056,7 +2056,24 @@ export const ChatPanel = clientEntry(
                             on("click", toggleStampPicker),
                           ]}
                         >
-                          🎴
+                          {/* 角がめくれたステッカー + 笑顔 */}
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+                            <path d="M15 3v3.5a2 2 0 0 0 2 2h3.5" />
+                            <path d="M8.5 13h.01" />
+                            <path d="M14.5 13h.01" />
+                            <path d="M9.5 16.2s1 1.1 2.5 1.1 2.5-1.1 2.5-1.1" />
+                          </svg>
                         </button>
                       )
                       : null}
