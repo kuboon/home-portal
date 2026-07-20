@@ -93,5 +93,10 @@ Bearer トークンを発行。Home には id 指定で メンバー追加）+ *
 同等のツールを人間と同じロール・レート制限で実行）+
 **スタンプ（ステッカー）**（画像は storage.kbn.one にブラウザ直アップロード、
 `kind='stamp'` の単独 post、ライブラリ 20 件 LRU・ホーム共有・使用時自動追加、
-picker/設定 UI、MCP
-`list_stamps`/`post_stamp`）まで実装済み。設計の全スコープを一巡。
+picker/設定 UI、MCP `list_stamps`/`post_stamp`）+ **画像
+post（添付）**（本文に画像 1 枚を添付。storage.kbn.one に直アップロード、
+`messages.image_key` に object key を保存、10MB・最大辺 4096px でクライアント
+検証・縮小、composer 添付 UI・タイムライン描画・repost サムネイル。画像付き post
+は編集不可。**7 日で自動削除**＝`?expireDays=7` で storage の `expire-at`
+を記録し 日次 cron が削除、UI に「M/D
+に削除されます」表示）まで実装済み。設計の全スコープを一巡。

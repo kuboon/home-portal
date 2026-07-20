@@ -44,6 +44,60 @@ export interface StampRef {
   contentType: string;
 }
 
+/** An image attached to a message (画像 post). Bytes live in storage.kbn.one. */
+export interface ImageRef {
+  /** storage.kbn.one object key; the client downloads the image with it. */
+  storageKey: string;
+  contentType: string;
+  /** Natural pixel dimensions (0 when unknown) for aspect-ratio layout. */
+  width: number;
+  height: number;
+  /** ISO time storage.kbn.one will auto-delete the image, or null. */
+  expiresAt: string | null;
+}
+
+/** Max attached-image dimension and byte size (enforced client-side too). */
+export const MAX_IMAGE_EDGE = 4096;
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_STORAGE_KEY = 512;
+
+/** Untrusted image attachment input (from a controller/MCP caller). */
+export interface ImageInput {
+  storageKey: string;
+  contentType?: string;
+  width?: number;
+  height?: number;
+  expiresAt?: string | null;
+}
+
+/** Validate and canonicalize an image attachment, or return null if absent. */
+function normalizeImage(input: ImageInput | null | undefined): ImageRef | null {
+  if (!input) return null;
+  const storageKey = input.storageKey.trim();
+  if (!storageKey) throw new HomeError("image storageKey is required");
+  if (storageKey.length > MAX_STORAGE_KEY) {
+    throw new HomeError("image storageKey too long");
+  }
+  const contentType = (input.contentType ?? "").trim();
+  if (contentType && !contentType.startsWith("image/")) {
+    throw new HomeError("添付できるのは画像のみです");
+  }
+  const dim = (n: number | undefined) =>
+    Number.isFinite(n) && (n as number) > 0 ? Math.floor(n as number) : 0;
+  // Keep only a parseable ISO timestamp; anything else is treated as no expiry.
+  const rawExpiry = (input.expiresAt ?? "").trim();
+  const expiresAt = rawExpiry && Number.isFinite(Date.parse(rawExpiry))
+    ? rawExpiry
+    : null;
+  return {
+    storageKey,
+    contentType,
+    width: dim(input.width),
+    height: dim(input.height),
+    expiresAt,
+  };
+}
+
 /** Summary of the original message a repost references. */
 export interface RepostOf {
   authorName: string;
@@ -51,6 +105,8 @@ export interface RepostOf {
   deleted: boolean;
   /** Set when the original is a stamp post. */
   stamp: StampRef | null;
+  /** Set when the original carries an attached image. */
+  image: ImageRef | null;
 }
 
 /** A thread that quotes (reposts) a given post — for the bidirectional link. */
@@ -81,6 +137,8 @@ export interface Message {
   repost: RepostOf | null;
   /** The stamp when `kind` is 'stamp' (null once deleted for the viewer). */
   stamp: StampRef | null;
+  /** Attached image (画像 post), or null (also null once deleted for viewer). */
+  image: ImageRef | null;
   /** Threads that quote (repost) this post — the bidirectional "quoted in" link. */
   quotedIn: QuoteRef[];
   /** Aggregated reactions (populated by `listMessages`). */
@@ -222,17 +280,26 @@ export async function postMessage(
     body?: string;
     /** Post this stamp instead of text (kind='stamp'; body becomes its label). */
     stampId?: string | null;
+    /**
+     * Attach an image (画像 post). The bytes must already be uploaded to
+     * storage.kbn.one; `storageKey` is the object key its upload API returned.
+     * With an image, `body` is an optional caption. Not combinable with a stamp.
+     */
+    image?: ImageInput | null;
   },
 ): Promise<Message> {
   let body = (input.body ?? "").trim();
+  const image = normalizeImage(input.image);
   if (input.stampId) {
+    if (image) throw new HomeError("スタンプと画像は同時に投稿できません");
     // A stamp post: the body is the stamp's label (alt text). Authorization
     // (may this user use this stamp here?) is the caller's job.
     const stamp = await getStamp(input.stampId);
     if (!stamp) throw new HomeError("stamp not found", 404);
     body = stamp.label;
   } else {
-    if (!body) throw new HomeError("message body is required");
+    // With an image the body is an optional caption; without one it's required.
+    if (!body && !image) throw new HomeError("message body is required");
     if (body.length > MAX_MESSAGE_LENGTH) {
       throw new HomeError(`message too long (max ${MAX_MESSAGE_LENGTH})`);
     }
@@ -242,7 +309,8 @@ export async function postMessage(
   const id = monotonicUlid();
   await (await db()).execute({
     sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body, " +
-      "kind, stamp_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "kind, stamp_id, image_key, image_type, image_w, image_h, " +
+      "image_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     args: [
       id,
       input.homeId,
@@ -251,6 +319,11 @@ export async function postMessage(
       body,
       input.stampId ? "stamp" : "normal",
       input.stampId ?? null,
+      image?.storageKey ?? null,
+      image?.contentType ?? "",
+      image?.width ?? 0,
+      image?.height ?? 0,
+      image?.expiresAt ?? null,
     ],
   });
   // Posting into a thread joins (or re-joins) the author and keeps it active.
@@ -269,7 +342,10 @@ const MESSAGE_SELECT =
   "COALESCE(omem.display_name, ou.display_name) AS r_author, " +
   "s.label AS s_label, s.storage_key AS s_key, s.content_type AS s_ctype, " +
   "os.id AS rs_id, os.label AS rs_label, os.storage_key AS rs_key, " +
-  "os.content_type AS rs_ctype " +
+  "os.content_type AS rs_ctype, " +
+  "o.image_key AS r_img_key, o.image_type AS r_img_type, " +
+  "o.image_w AS r_img_w, o.image_h AS r_img_h, " +
+  "o.image_expires_at AS r_img_exp " +
   "FROM messages m " +
   "JOIN users u ON u.id = m.author_id " +
   "LEFT JOIN memberships mem ON mem.home_id = m.home_id AND mem.user_id = m.author_id " +
@@ -324,6 +400,15 @@ function rowToMessage(
           contentType: String(row.rs_ctype ?? ""),
         }
         : null,
+      image: !rDeleted && row.r_img_key != null
+        ? {
+          storageKey: String(row.r_img_key),
+          contentType: String(row.r_img_type ?? ""),
+          width: Number(row.r_img_w ?? 0),
+          height: Number(row.r_img_h ?? 0),
+          expiresAt: row.r_img_exp == null ? null : String(row.r_img_exp),
+        }
+        : null,
     };
   }
   const stamp: StampRef | null =
@@ -335,6 +420,17 @@ function rowToMessage(
         contentType: String(row.s_ctype ?? ""),
       }
       : null;
+  const image: ImageRef | null = row.image_key != null && !deletedForViewer
+    ? {
+      storageKey: String(row.image_key),
+      contentType: String(row.image_type ?? ""),
+      width: Number(row.image_w ?? 0),
+      height: Number(row.image_h ?? 0),
+      expiresAt: row.image_expires_at == null
+        ? null
+        : String(row.image_expires_at),
+    }
+    : null;
   return {
     id: String(row.id),
     homeId: String(row.home_id),
@@ -351,6 +447,7 @@ function rowToMessage(
     repostOf: refPostId,
     repost,
     stamp,
+    image,
     quotedIn: [],
     reactions: [],
   };
@@ -589,13 +686,16 @@ export async function editMessage(
   }
   const client = await db();
   const { rows } = await client.execute({
-    sql: "SELECT home_id, thread_id, author_id, kind, " +
+    sql: "SELECT home_id, thread_id, author_id, kind, image_key, " +
       "tombstone_at, hidden_at FROM messages WHERE id = ?",
     args: [input.messageId],
   });
   const row = rows[0];
   if (
     !row || String(row.author_id) !== input.authorId || row.kind !== "normal" ||
+    // An image post isn't editable: the forward-edit re-posts body only and
+    // would silently drop the attachment.
+    row.image_key != null ||
     row.tombstone_at != null || row.hidden_at != null
   ) {
     throw new HomeError("message not found or not editable", 404);
