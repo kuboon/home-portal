@@ -16,6 +16,7 @@ import {
   getThread,
   hideMessage,
   HomeError,
+  type ImageInput,
   leaveThread,
   listMainMessages,
   listMessages,
@@ -70,10 +71,12 @@ function signalChannel(ctx: { homeId: string; threadId: string | null }) {
 }
 
 /**
- * Post a text message or a stamp (when `stampId` is set) into a channel.
- * A stamp must be usable by the author in that home (their library, or owned
- * by a member — the sharing model); using one refreshes/auto-adds it to the
- * author's library (LRU). Returns the message, or an error response.
+ * Post a text message, a stamp (`stampId`), or a message with an attached
+ * image (`image`) into a channel. A stamp must be usable by the author in that
+ * home (their library, or owned by a member — the sharing model); using one
+ * refreshes/auto-adds it to the author's library (LRU). An image's bytes are
+ * already in storage.kbn.one (browser upload); we only record the key.
+ * Returns the message, or an error response.
  */
 async function postToChannel(input: {
   homeId: string;
@@ -81,6 +84,7 @@ async function postToChannel(input: {
   authorId: string;
   body?: string;
   stampId?: string;
+  image?: ImageInput | null;
 }): Promise<Message | Response> {
   if (input.stampId) {
     if (!(await canUseStamp(input.stampId, input.authorId, input.homeId))) {
@@ -95,9 +99,26 @@ async function postToChannel(input: {
     authorId: input.authorId,
     body: input.body ?? "",
     stampId: input.stampId,
+    image: input.image,
   });
   if (input.stampId) await touchStamp(input.authorId, input.stampId);
   return message;
+}
+
+/** Extract a well-formed image attachment from an untrusted request body. */
+function readImage(body: { image?: unknown }): ImageInput | undefined {
+  const img = body.image;
+  if (!img || typeof img !== "object") return undefined;
+  const rec = img as Record<string, unknown>;
+  if (typeof rec.storageKey !== "string") return undefined;
+  return {
+    storageKey: rec.storageKey,
+    contentType: typeof rec.contentType === "string"
+      ? rec.contentType
+      : undefined,
+    width: typeof rec.width === "number" ? rec.width : undefined,
+    height: typeof rec.height === "number" ? rec.height : undefined,
+  };
 }
 
 /**
@@ -282,6 +303,7 @@ export const threadsController = {
       const body = await context.request.json() as {
         body?: string;
         stampId?: string;
+        image?: unknown;
       };
       try {
         const message = await postToChannel({
@@ -289,6 +311,7 @@ export const threadsController = {
           authorId: userId,
           body: body.body,
           stampId: body.stampId,
+          image: readImage(body),
         });
         if (message instanceof Response) return message;
         await signalMainChannel(homeId);
@@ -382,6 +405,7 @@ export const threadsController = {
       const body = await context.request.json() as {
         body?: string;
         stampId?: string;
+        image?: unknown;
       };
       try {
         const message = await postToChannel({
@@ -390,6 +414,7 @@ export const threadsController = {
           authorId: userId,
           body: body.body,
           stampId: body.stampId,
+          image: readImage(body),
         });
         if (message instanceof Response) return message;
         await signalThread(threadId);

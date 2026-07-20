@@ -22,8 +22,10 @@ import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
 import {
-  stampImageUrl,
+  storageImageUrl,
   type StorageSession,
+  type UploadedImage,
+  uploadPostImage,
   uploadStampImage,
 } from "./storage.ts";
 
@@ -132,6 +134,14 @@ interface StampRef {
   storageKey: string;
 }
 
+/** A message's attached image (画像 post). */
+interface ImageRef {
+  storageKey: string;
+  contentType: string;
+  width: number;
+  height: number;
+}
+
 interface Message {
   id: string;
   authorId: string;
@@ -147,8 +157,10 @@ interface Message {
     body: string;
     deleted: boolean;
     stamp: StampRef | null;
+    image: ImageRef | null;
   } | null;
   stamp: StampRef | null;
+  image: ImageRef | null;
   quotedIn: { threadId: string; title: string }[];
   reactions: { emoji: string; count: number; mine: boolean }[];
 }
@@ -230,6 +242,8 @@ export const ChatPanel = clientEntry(
       body: string;
       createdAt: string;
       threadId: string | null;
+      /** 添付画像のプレビュー（ローカル blob）と表示比率。 */
+      image: { previewUrl: string; width: number; height: number } | null;
     }[] = [];
     let pendingSeq = 0;
     let recentEmojis: string[] = [];
@@ -241,6 +255,9 @@ export const ChatPanel = clientEntry(
     let stampUploading = false;
     const stampUrls = new Map<string, string>();
     const stampUrlPending = new Set<string>();
+    // 添付画像: composer に付けて未送信の 1 枚（プレビュー用 blob URL 付き）。
+    let pendingImage: (UploadedImage & { previewUrl: string }) | null = null;
+    let imageUploading = false;
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
     // 長押しで開くコンテキストメニュー（ボトムシート）。
@@ -403,14 +420,15 @@ export const ChatPanel = clientEntry(
     /**
      * storage.kbn.one の画像の blob URL。未取得ならダウンロードを開始して
      * いったん null を返し、完了時に re-render する（1 key につき 1 回）。
+     * スタンプと添付画像の両方で使う。
      */
-    const stampSrc = (key: string): string | null => {
+    const objectSrc = (key: string): string | null => {
       const hit = stampUrls.get(key);
       if (hit) return hit;
       const session = storageSession();
       if (!session || stampUrlPending.has(key)) return null;
       stampUrlPending.add(key);
-      stampImageUrl(session, key)
+      storageImageUrl(session, key)
         .then((url) => {
           stampUrls.set(key, url);
           handle.update();
@@ -422,10 +440,46 @@ export const ChatPanel = clientEntry(
 
     /** スタンプ画像（取得中は skeleton）。`cls` でサイズを指定する。 */
     const stampImg = (key: string, label: string, cls: string) => {
-      const src = stampSrc(key);
+      const src = objectSrc(key);
       return src
         ? <img src={src} alt={label} title={label} class={cls} />
         : <div class={`skeleton ${cls}`} title={label}></div>;
+    };
+
+    /**
+     * 添付画像。natural サイズからアスペクト比を先に確保して読み込み中の
+     * レイアウトシフトを防ぐ。タップで原寸を新規タブに開く。
+     */
+    const postImg = (img: ImageRef) => {
+      const src = objectSrc(img.storageKey);
+      // 表示上の最大サイズ（内部スクロールに収める）。実比率は width/height。
+      const ratio = img.width > 0 && img.height > 0
+        ? `${img.width} / ${img.height}`
+        : "1 / 1";
+      const box =
+        "rounded-lg border border-base-300 max-w-[min(20rem,80%)] max-h-80";
+      if (!src) {
+        return (
+          <div
+            class={`skeleton ${box}`}
+            style={`aspect-ratio:${ratio};width:${
+              Math.min(img.width || 320, 320)
+            }px`}
+          >
+          </div>
+        );
+      }
+      return (
+        <a href={src} target="_blank" rel="noopener" class="inline-block">
+          <img
+            src={src}
+            alt="添付画像"
+            loading="lazy"
+            class={`${box} object-contain`}
+            style={`aspect-ratio:${ratio}`}
+          />
+        </a>
+      );
     };
 
     const toggleStampPicker = () => {
@@ -488,6 +542,36 @@ export const ChatPanel = clientEntry(
         await loadStamps();
       });
 
+    /** Drop the composer's attached image (revoking its preview blob URL). */
+    const clearAttachment = () => {
+      if (pendingImage) {
+        URL.revokeObjectURL(pendingImage.previewUrl);
+        pendingImage = null;
+      }
+    };
+
+    /**
+     * 画像を選択 → storage.kbn.one へアップロードして composer に添付する
+     * （送信は onPost）。10MB/4096px の検証・リサイズは uploadPostImage 側。
+     */
+    const onAttachImage = (file: File) =>
+      run(async () => {
+        const session = storageSession();
+        if (!session) throw new Error("サインインし直してください");
+        clearAttachment();
+        imageUploading = true;
+        handle.update();
+        try {
+          const uploaded = await uploadPostImage(session, file);
+          pendingImage = {
+            ...uploaded,
+            previewUrl: URL.createObjectURL(file),
+          };
+        } finally {
+          imageUploading = false;
+        }
+      });
+
     /** Open the active channel's SSE stream; re-fetch messages on each ping. */
     const startStream = (threadId: string | null) => {
       streamAbort?.abort();
@@ -530,6 +614,7 @@ export const ChatPanel = clientEntry(
         currentThreadId = threadId;
         paletteFor = null;
         stampPickerOpen = false;
+        clearAttachment();
         // 別チャンネルへ移ると編集対象が見えなくなるので編集モードを解除。
         editingId = null;
         editInfoOpen = false;
@@ -712,7 +797,8 @@ export const ChatPanel = clientEntry(
      */
     const onPost = () => {
       const body = newMessage.trim();
-      if (!body || archived()) return;
+      // 本文が空でも画像が添付されていれば送信できる。
+      if ((!body && !pendingImage) || archived()) return;
       // 編集モード中は当該メッセージを編集（サーバ側で「編集マーク＋末尾に
       // 新規投稿」になる）。それ以外は通常の楽観的送信。
       if (editingId) {
@@ -739,13 +825,26 @@ export const ChatPanel = clientEntry(
         return;
       }
       const base = channelBase();
+      // 添付画像を取り込み、composer からは外す（送信中プレビューへ引き継ぐ）。
+      const image = pendingImage;
+      pendingImage = null;
       const pending = {
         id: `pending-${++pendingSeq}`,
         body,
         // サーバの datetime('now') と同じ UTC "YYYY-MM-DD HH:MM:SS" 形式。
         createdAt: new Date().toISOString().slice(0, 19).replace("T", " "),
         threadId: currentThreadId,
+        image: image
+          ? {
+            previewUrl: image.previewUrl,
+            width: image.width,
+            height: image.height,
+          }
+          : null,
       };
+      // 送信中プレビューは合成メッセージの image.storageKey='pending:<id>' 経由
+      // で表示するので、その key に blob URL を先に登録しておく。
+      if (image) stampUrls.set(`pending:${pending.id}`, image.previewUrl);
       newMessage = "";
       error = "";
       pendingPosts = [...pendingPosts, pending];
@@ -755,13 +854,30 @@ export const ChatPanel = clientEntry(
           await api(`${base}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ body }),
+            body: JSON.stringify({
+              body,
+              image: image
+                ? {
+                  storageKey: image.key,
+                  contentType: image.contentType,
+                  width: image.width,
+                  height: image.height,
+                }
+                : undefined,
+            }),
           });
           await loadMessages();
         } catch (e) {
           error = (e as Error).message;
           if (!newMessage.trim()) newMessage = body;
+          // 失敗したら添付を戻す（プレビューを復元）。
+          if (image && !pendingImage) pendingImage = image;
         } finally {
+          // 成功時はサーバ画像に置き換わるのでプレビュー blob を解放。
+          if (image && pendingImage !== image) {
+            stampUrls.delete(`pending:${pending.id}`);
+            URL.revokeObjectURL(image.previewUrl);
+          }
           pendingPosts = pendingPosts.filter((p) => p.id !== pending.id);
           handle.update();
         }
@@ -772,6 +888,7 @@ export const ChatPanel = clientEntry(
     const onEdit = (messageId: string, current: string) => {
       editingId = messageId;
       editInfoOpen = false;
+      clearAttachment();
       newMessage = current;
       error = "";
       handle.update();
@@ -1040,7 +1157,20 @@ export const ChatPanel = clientEntry(
                       m.repost.stamp.label,
                       "h-16 w-16 object-contain mt-1",
                     )
-                    : m.repost.body}
+                    : (
+                      <span>
+                        {m.repost.image
+                          ? stampImg(
+                            m.repost.image.storageKey,
+                            "画像",
+                            "h-16 w-16 object-contain mt-1 inline-block align-middle rounded",
+                          )
+                          : null}
+                        {m.repost.body
+                          ? <span class="align-middle">{m.repost.body}</span>
+                          : null}
+                      </span>
+                    )}
                 </div>
               )
               : null}
@@ -1058,7 +1188,7 @@ export const ChatPanel = clientEntry(
                 </div>
               )
               : null}
-            {!m.deleted && m.kind !== "stamp"
+            {!m.deleted && m.kind !== "stamp" && m.body
               ? (
                 <div
                   class={`whitespace-pre-wrap break-words leading-relaxed ${
@@ -1069,6 +1199,13 @@ export const ChatPanel = clientEntry(
                   {m.editedAt
                     ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
                     : null}
+                </div>
+              )
+              : null}
+            {!m.deleted && m.image
+              ? (
+                <div class={`mt-1 ${m.hidden ? "opacity-60" : ""}`}>
+                  {postImg(m.image)}
                 </div>
               )
               : null}
@@ -1189,7 +1326,7 @@ export const ChatPanel = clientEntry(
                 >
                   ↩︎
                 </button>
-                {!archived() && mine && m.kind === "normal"
+                {!archived() && mine && m.kind === "normal" && !m.image
                   ? (
                     <button
                       type="button"
@@ -1264,6 +1401,15 @@ export const ChatPanel = clientEntry(
           hidden: false,
           repost: null,
           stamp: null,
+          // 送信中プレビューは 'pending:<id>' key で blob URL を引く。
+          image: p.image
+            ? {
+              storageKey: `pending:${p.id}`,
+              contentType: "",
+              width: p.image.width,
+              height: p.image.height,
+            }
+            : null,
           quotedIn: [],
           reactions: [],
         });
@@ -1822,7 +1968,7 @@ export const ChatPanel = clientEntry(
                   <span class="w-6 text-center">↩︎</span> スレッドで返信
                 </a>
               </li>
-              {!archived() && mine && m.kind === "normal"
+              {!archived() && mine && m.kind === "normal" && !m.image
                 ? (
                   <li>
                     <a
@@ -2011,6 +2157,43 @@ export const ChatPanel = clientEntry(
                     )
                     : null}
                   {stampPickerOpen && !editingId ? stampPicker() : null}
+                  {!editingId && (pendingImage || imageUploading)
+                    ? (
+                      <div class="mb-1 flex items-center gap-2">
+                        {imageUploading
+                          ? (
+                            <div class="flex items-center gap-2 text-sm opacity-70">
+                              <span class="loading loading-spinner loading-sm">
+                              </span>
+                              画像をアップロード中…
+                            </div>
+                          )
+                          : pendingImage
+                          ? (
+                            <div class="relative">
+                              <img
+                                src={pendingImage.previewUrl}
+                                alt="添付プレビュー"
+                                class="h-20 w-20 object-cover rounded-lg border border-base-300"
+                              />
+                              <button
+                                type="button"
+                                class="btn btn-xs btn-circle absolute -top-2 -right-2"
+                                aria-label="添付を取り消す"
+                                title="添付を取り消す"
+                                mix={[on("click", () => {
+                                  clearAttachment();
+                                  handle.update();
+                                })]}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )
+                          : null}
+                      </div>
+                    )
+                    : null}
                   <div
                     class={`flex items-center gap-1 rounded-xl border bg-base-100 px-2 py-1 shadow-sm transition-colors ${
                       editingId
@@ -2042,6 +2225,44 @@ export const ChatPanel = clientEntry(
                         }),
                       ]}
                     />
+                    {!editingId
+                      ? (
+                        <label
+                          class="btn btn-ghost btn-sm btn-circle"
+                          aria-label="画像を添付"
+                          title="画像を添付"
+                        >
+                          {/* 画像（山と太陽）アイコン */}
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            aria-hidden="true"
+                          >
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="9" cy="9" r="1.6" />
+                            <path d="M21 15l-4.5-4.5L7 20" />
+                          </svg>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            class="hidden"
+                            disabled={imageUploading}
+                            mix={[on<HTMLInputElement>("change", (e) => {
+                              const input = e.target as HTMLInputElement;
+                              const file = input.files?.[0];
+                              input.value = "";
+                              if (file) onAttachImage(file);
+                            })]}
+                          />
+                        </label>
+                      )
+                      : null}
                     {!editingId
                       ? (
                         <button
@@ -2082,7 +2303,8 @@ export const ChatPanel = clientEntry(
                       class="btn btn-primary btn-sm btn-circle"
                       aria-label={editingId ? "更新" : "送信"}
                       title={editingId ? "更新" : "送信"}
-                      disabled={!newMessage.trim()}
+                      disabled={!newMessage.trim() &&
+                        !(pendingImage && !editingId)}
                       mix={[
                         // タップ/クリックで入力欄からフォーカスを奪わない
                         // （スマホのキーボードが閉じないように）。click は
