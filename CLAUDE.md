@@ -97,4 +97,6 @@ picker/設定 UI、MCP `list_stamps`/`post_stamp`）+ **画像
 post（添付）**（本文に画像 1 枚を添付。storage.kbn.one に直アップロード、
 `messages.image_key` に object key を保存、10MB・最大辺 4096px でクライアント
 検証・縮小、composer 添付 UI・タイムライン描画・repost サムネイル。画像付き post
-は編集不可）まで実装済み。設計の全スコープを一巡。
+は編集不可。**7 日で自動削除**＝`?expireDays=7` で storage の `expire-at`
+を記録し 日次 cron が削除、UI に「M/D
+に削除されます」表示）まで実装済み。設計の全スコープを一巡。

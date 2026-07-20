@@ -37,6 +37,7 @@ const IMG = {
   contentType: "image/jpeg",
   width: 1200,
   height: 800,
+  expiresAt: null,
 };
 
 Deno.test("postMessage attaches an image with an optional caption", async () => {
@@ -103,6 +104,29 @@ Deno.test("image validation: content type and storageKey", async () => {
   });
   assertEquals(ok.image?.width, 0);
   assertEquals(ok.image?.height, 0);
+});
+
+Deno.test("image expiry is stored and round-trips (and rejects garbage)", async () => {
+  const { home, thread } = await setup();
+  const expiresAt = "2026-07-27T00:00:00.000Z";
+  const posted = await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    image: { ...IMG, expiresAt },
+  });
+  assertEquals(posted.image?.expiresAt, expiresAt);
+  const [m] = await listMessages(thread.id, "alice");
+  assertEquals(m.image?.expiresAt, expiresAt);
+
+  // A non-ISO expiry is dropped to null rather than persisted verbatim.
+  const bad = await postMessage({
+    homeId: home.id,
+    threadId: thread.id,
+    authorId: "alice",
+    image: { ...IMG, expiresAt: "soon" },
+  });
+  assertEquals(bad.image?.expiresAt, null);
 });
 
 Deno.test("stamp and image cannot be combined", async () => {

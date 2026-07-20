@@ -140,6 +140,8 @@ interface ImageRef {
   contentType: string;
   width: number;
   height: number;
+  /** ISO time storage.kbn.one auto-deletes it, or null. */
+  expiresAt: string | null;
 }
 
 interface Message {
@@ -446,20 +448,43 @@ export const ChatPanel = clientEntry(
         : <div class={`skeleton ${cls}`} title={label}></div>;
     };
 
+    /** 添付画像が期限切れ（storage 側で削除済み）か。 */
+    const imageExpired = (img: ImageRef): boolean =>
+      img.expiresAt != null && Date.now() >= parseUtc(img.expiresAt).getTime();
+
+    /** 「M/D に削除されます」のキャプション（期限がなければ null）。 */
+    const expiryNote = (img: ImageRef): string | null => {
+      if (!img.expiresAt) return null;
+      const d = parseUtc(img.expiresAt);
+      if (isNaN(d.getTime())) return null;
+      return `${d.getMonth() + 1}/${d.getDate()} に削除されます`;
+    };
+
     /**
      * 添付画像。natural サイズからアスペクト比を先に確保して読み込み中の
-     * レイアウトシフトを防ぐ。タップで原寸を新規タブに開く。
+     * レイアウトシフトを防ぐ。タップで原寸を新規タブに開く。期限切れは
+     * fetch せず「削除されました」を出す。近くに削除予定日を表示。
      */
     const postImg = (img: ImageRef) => {
-      const src = objectSrc(img.storageKey);
       // 表示上の最大サイズ（内部スクロールに収める）。実比率は width/height。
       const ratio = img.width > 0 && img.height > 0
         ? `${img.width} / ${img.height}`
         : "1 / 1";
       const box =
         "rounded-lg border border-base-300 max-w-[min(20rem,80%)] max-h-80";
-      if (!src) {
+
+      if (imageExpired(img)) {
         return (
+          <div class="rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-sm italic opacity-60 w-fit">
+            🗑 期限切れのため画像は削除されました
+          </div>
+        );
+      }
+
+      const note = expiryNote(img);
+      const src = objectSrc(img.storageKey);
+      const picture = !src
+        ? (
           <div
             class={`skeleton ${box}`}
             style={`aspect-ratio:${ratio};width:${
@@ -467,18 +492,30 @@ export const ChatPanel = clientEntry(
             }px`}
           >
           </div>
+        )
+        : (
+          <a href={src} target="_blank" rel="noopener" class="inline-block">
+            <img
+              src={src}
+              alt="添付画像"
+              loading="lazy"
+              class={`${box} object-contain`}
+              style={`aspect-ratio:${ratio}`}
+            />
+          </a>
         );
-      }
       return (
-        <a href={src} target="_blank" rel="noopener" class="inline-block">
-          <img
-            src={src}
-            alt="添付画像"
-            loading="lazy"
-            class={`${box} object-contain`}
-            style={`aspect-ratio:${ratio}`}
-          />
-        </a>
+        <div>
+          {picture}
+          {note
+            ? (
+              <div class="text-xs opacity-50 mt-0.5 flex items-center gap-1">
+                <span aria-hidden="true">🕒</span>
+                {note}
+              </div>
+            )
+            : null}
+        </div>
       );
     };
 
@@ -1408,6 +1445,7 @@ export const ChatPanel = clientEntry(
               contentType: "",
               width: p.image.width,
               height: p.image.height,
+              expiresAt: null,
             }
             : null,
           quotedIn: [],

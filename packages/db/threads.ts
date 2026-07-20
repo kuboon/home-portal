@@ -52,6 +52,8 @@ export interface ImageRef {
   /** Natural pixel dimensions (0 when unknown) for aspect-ratio layout. */
   width: number;
   height: number;
+  /** ISO time storage.kbn.one will auto-delete the image, or null. */
+  expiresAt: string | null;
 }
 
 /** Max attached-image dimension and byte size (enforced client-side too). */
@@ -65,6 +67,7 @@ export interface ImageInput {
   contentType?: string;
   width?: number;
   height?: number;
+  expiresAt?: string | null;
 }
 
 /** Validate and canonicalize an image attachment, or return null if absent. */
@@ -81,11 +84,17 @@ function normalizeImage(input: ImageInput | null | undefined): ImageRef | null {
   }
   const dim = (n: number | undefined) =>
     Number.isFinite(n) && (n as number) > 0 ? Math.floor(n as number) : 0;
+  // Keep only a parseable ISO timestamp; anything else is treated as no expiry.
+  const rawExpiry = (input.expiresAt ?? "").trim();
+  const expiresAt = rawExpiry && Number.isFinite(Date.parse(rawExpiry))
+    ? rawExpiry
+    : null;
   return {
     storageKey,
     contentType,
     width: dim(input.width),
     height: dim(input.height),
+    expiresAt,
   };
 }
 
@@ -300,8 +309,8 @@ export async function postMessage(
   const id = monotonicUlid();
   await (await db()).execute({
     sql: "INSERT INTO messages (id, home_id, thread_id, author_id, body, " +
-      "kind, stamp_id, image_key, image_type, image_w, image_h) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "kind, stamp_id, image_key, image_type, image_w, image_h, " +
+      "image_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     args: [
       id,
       input.homeId,
@@ -314,6 +323,7 @@ export async function postMessage(
       image?.contentType ?? "",
       image?.width ?? 0,
       image?.height ?? 0,
+      image?.expiresAt ?? null,
     ],
   });
   // Posting into a thread joins (or re-joins) the author and keeps it active.
@@ -334,7 +344,8 @@ const MESSAGE_SELECT =
   "os.id AS rs_id, os.label AS rs_label, os.storage_key AS rs_key, " +
   "os.content_type AS rs_ctype, " +
   "o.image_key AS r_img_key, o.image_type AS r_img_type, " +
-  "o.image_w AS r_img_w, o.image_h AS r_img_h " +
+  "o.image_w AS r_img_w, o.image_h AS r_img_h, " +
+  "o.image_expires_at AS r_img_exp " +
   "FROM messages m " +
   "JOIN users u ON u.id = m.author_id " +
   "LEFT JOIN memberships mem ON mem.home_id = m.home_id AND mem.user_id = m.author_id " +
@@ -395,6 +406,7 @@ function rowToMessage(
           contentType: String(row.r_img_type ?? ""),
           width: Number(row.r_img_w ?? 0),
           height: Number(row.r_img_h ?? 0),
+          expiresAt: row.r_img_exp == null ? null : String(row.r_img_exp),
         }
         : null,
     };
@@ -414,6 +426,9 @@ function rowToMessage(
       contentType: String(row.image_type ?? ""),
       width: Number(row.image_w ?? 0),
       height: Number(row.image_h ?? 0),
+      expiresAt: row.image_expires_at == null
+        ? null
+        : String(row.image_expires_at),
     }
     : null;
   return {

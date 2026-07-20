@@ -18,6 +18,8 @@ export const MAX_STAMP_IMAGE_BYTES = 2 * 1024 * 1024;
 /** 添付画像の上限（DESIGN.md: 10MB・最大辺 4096px）。 */
 export const MAX_POST_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_IMAGE_EDGE = 4096;
+/** 添付画像の保持日数。storage.kbn.one がこの日数で自動削除する。 */
+export const POST_IMAGE_EXPIRE_DAYS = 7;
 
 export interface StorageSession {
   fetchDpop: FetchDpop;
@@ -31,6 +33,8 @@ export interface UploadedImage {
   contentType: string;
   width: number;
   height: number;
+  /** ISO time storage.kbn.one will auto-delete it, or null if it won't. */
+  expireAt: string | null;
 }
 
 function authHeaders(accessToken: string, extra?: HeadersInit): Headers {
@@ -39,14 +43,20 @@ function authHeaders(accessToken: string, extra?: HeadersInit): Headers {
   return headers;
 }
 
-/** Stream a blob/file to `POST /upload`, returning the stored object key. */
+/**
+ * Stream a blob/file to `POST /upload`, returning the stored object key and
+ * the auto-delete time. Pass `expireDays` to have storage.kbn.one delete the
+ * object after N days (omit for indefinite retention, e.g. stamps).
+ */
 async function uploadBlob(
   session: StorageSession,
   blob: Blob,
   filename: string,
-): Promise<string> {
+  expireDays?: number,
+): Promise<{ key: string; expireAt: string | null }> {
   const url = new URL("/upload", session.storageOrigin);
   url.searchParams.set("filename", filename);
+  if (expireDays) url.searchParams.set("expireDays", String(expireDays));
   const response = await session.fetchDpop(url.toString(), {
     method: "POST",
     headers: authHeaders(session.accessToken, {
@@ -57,9 +67,9 @@ async function uploadBlob(
   if (!response.ok) {
     throw new Error(`アップロードに失敗しました (${response.status})`);
   }
-  const data = await response.json() as { key?: string };
+  const data = await response.json() as { key?: string; expireAt?: string };
   if (!data.key) throw new Error("アップロード結果に key がありません");
-  return data.key;
+  return { key: data.key, expireAt: data.expireAt ?? null };
 }
 
 /**
@@ -76,7 +86,9 @@ export async function uploadStampImage(
   if (file.size > MAX_STAMP_IMAGE_BYTES) {
     throw new Error("画像が大きすぎます（2MB まで）");
   }
-  return await uploadBlob(session, file, file.name);
+  // Stamps are library items — uploaded without a TTL (kept indefinitely).
+  const { key } = await uploadBlob(session, file, file.name);
+  return key;
 }
 
 /** Read an image's natural dimensions, or (0,0) if the format won't decode. */
@@ -143,8 +155,13 @@ export async function uploadPostImage(
     if (file.size > MAX_POST_IMAGE_BYTES) {
       throw new Error("画像が大きすぎます（10MB まで）");
     }
-    const key = await uploadBlob(session, file, file.name);
-    return { key, contentType: file.type, width, height };
+    const { key, expireAt } = await uploadBlob(
+      session,
+      file,
+      file.name,
+      POST_IMAGE_EXPIRE_DAYS,
+    );
+    return { key, contentType: file.type, width, height, expireAt };
   }
 
   // Oversized. Animated GIFs can't be downscaled without flattening.
@@ -157,12 +174,18 @@ export async function uploadPostImage(
   }
   const name = file.name.replace(/\.[^.]+$/, "") +
     (scaled.blob.type === "image/png" ? ".png" : ".jpg");
-  const key = await uploadBlob(session, scaled.blob, name);
+  const { key, expireAt } = await uploadBlob(
+    session,
+    scaled.blob,
+    name,
+    POST_IMAGE_EXPIRE_DAYS,
+  );
   return {
     key,
     contentType: scaled.blob.type,
     width: scaled.width,
     height: scaled.height,
+    expireAt,
   };
 }
 

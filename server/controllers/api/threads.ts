@@ -118,6 +118,7 @@ function readImage(body: { image?: unknown }): ImageInput | undefined {
       : undefined,
     width: typeof rec.width === "number" ? rec.width : undefined,
     height: typeof rec.height === "number" ? rec.height : undefined,
+    expiresAt: typeof rec.expiresAt === "string" ? rec.expiresAt : undefined,
   };
 }
 

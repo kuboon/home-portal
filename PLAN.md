@@ -58,9 +58,8 @@
 
 - **画像の保存方式**: スタンプ・画像 post とも **storage.kbn.one** で確定
   （ブラウザ直アップロード + blob URL 表示）。
-- **画像 post の保存ポリシー**: 現状はオリジナル（最大辺 4096px）を無期限保持。
-  失効・世代圧縮は storage.kbn.one の admin prune / R2
-  ライフサイクル任せ（要運用 方針）。
+- **画像 post の保存ポリシー**: **7 日で自動削除**に確定（storage.kbn.one の
+  `expire-at` + 日次 cron）。世代圧縮は未対応。
 - **ホーム削除**: 物理削除 / 論理削除（痕跡方針なら論理）。
 - **web push の強制度**: 完全任意 / 繰り返し促す / 段階ゲート。
 - 通知バックオフのリセット条件と cap（現状 cap 4 分・静穏でリセット）。
@@ -150,14 +149,24 @@ canvas で縮小（PNG は透過保持、他は JPEG 再エンコード）。**G
 ページ内メモ化、スタンプと共用）。CSP は stamp 対応時に `img-src blob:` /
 `connect-src STORAGE_ORIGIN` を追加済みで変更不要。
 
+### 有効期限（7 日で自動削除）
+
+- 添付画像は **storage.kbn.one が 7 日で自動削除**する。`uploadPostImage` が
+  `POST /upload?expireDays=7` を付け、storage 側が `expire-at` メタデータを記録
+  → 日次 cron（Worker の `scheduled` → `pruneExpired`）が期限切れを削除。
+  スタンプは `expireDays` を付けないので無期限（削除対象外）。
+- storage が返す `expireAt` を `messages.image_expires_at`（`0014`）に保存し、
+  画像の下に **「M/D に削除されます」** を表示。期限を過ぎたら画像を fetch せず
+  「🗑 期限切れのため画像は削除されました」を表示する。
+
 ### API
 
 - 送信は既存の投稿 API に
-  `{ image: { storageKey, contentType, width, height } }`
+  `{ image: { storageKey, contentType, width, height, expiresAt } }`
   を渡す（`POST /api/threads/:threadId/messages`・`POST
   /api/homes/:homeId/messages`）。本文は画像があれば任意。
-- storage-provider 側は**変更なし**（汎用 upload/download がそのまま使える。
-  500MB 上限 > 10MB、content-type 非依存）。
+- storage-provider 側は **expire 機能を追加**（`?expireDays=N` +
+  `scheduled`/cron の `pruneExpired`）。upload/download 自体は汎用のまま。
 
 ### 残改善（画像 post）
 
@@ -166,4 +175,5 @@ canvas で縮小（PNG は透過保持、他は JPEG 再エンコード）。**G
 - **MCP からの画像投稿**は未対応（storage.kbn.one が id.kbn.one ユーザ認証の
   ため、エージェントのアップロード経路がない。スタンプと同じ制約）。DESIGN の
   MCP スコープ「画像投稿」は将来課題。
-- 保存は無期限（失効ポリシー未定。上記「要決定」参照）。
+- 期限（7 日）はクライアント定数 `POST_IMAGE_EXPIRE_DAYS`。可変 TTL やホーム別
+  設定は未対応。
