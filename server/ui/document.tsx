@@ -47,26 +47,22 @@ export function Document(handle: Handle<DocumentProps>) {
               ホムポタ
             </a>
           </div>
+          {
+            /* Minimal top nav: the product's only global journey is
+              landing → sign in → home list. All settings (members, theme,
+              invites, agents, notifications) live inside each home. */
+          }
           <nav class="navbar-end gap-2">
             <ul class="menu menu-horizontal px-1">
               <li>
-                <a href={routes.welcome.href()} rmx-target="content">Home</a>
-              </li>
-              <li>
-                <a href={routes.homes.href()} rmx-target="content">Homes</a>
-              </li>
-              <li>
-                <a href={routes.agents.href()} rmx-target="content">
-                  エージェント
+                <a href={routes.homes.href()} rmx-target="content">
+                  ホーム一覧
                 </a>
               </li>
               <li>
-                <a href={routes.notifications.href()} rmx-target="content">
-                  通知
+                <a href={routes.signin.href()} rmx-target="content">
+                  サインイン
                 </a>
-              </li>
-              <li>
-                <a href={routes.signin.href()} rmx-target="content">Sign In</a>
               </li>
             </ul>
             <div class="dropdown dropdown-end">
