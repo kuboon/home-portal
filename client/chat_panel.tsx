@@ -1730,9 +1730,23 @@ export const ChatPanel = clientEntry(
                 </button>
               </div>
               <div class="mt-2">{stampSettings()}</div>
-              <div class="text-sm opacity-50 mt-2">
-                MCP 連携の設定（未実装）
+              <div class="divider my-1"></div>
+              {
+                /* User-level management, reached from within a home (the app's
+                  settings all live in-home). These are full-page screens. */
+              }
+              <div class="flex flex-wrap gap-2">
+                <a class="btn btn-sm btn-outline" href="/notifications">
+                  🔔 通知・ホーム画面に追加
+                </a>
+                <a class="btn btn-sm btn-outline" href="/agents">
+                  🤖 エージェント管理
+                </a>
               </div>
+              <p class="text-xs opacity-50 mt-1">
+                通知の受信登録とこのアプリのホーム画面追加、AI
+                エージェント（MCP）の作成・トークン発行はこちら。
+              </p>
             </div>
           </div>
 

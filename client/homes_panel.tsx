@@ -1,9 +1,12 @@
 /**
  * HomesPanel — a @remix-run/ui `clientEntry` for the /homes page.
  *
- * Loads the signed-in user's homes via DPoP-protected `/api/homes`, and lets
- * them create a home and (as an admin) manage members: add by userId, change
- * role, remove. All requests are signed with `fetchDpop` from `ensureSession`.
+ * The home list is intentionally lean: it lists the homes the signed-in user
+ * belongs to (open one to chat), and lets them create a home or join by an
+ * invite code. Everything else — members, roles, invites, theme, agents,
+ * notifications — is managed inside each home (the chat screen's settings), so
+ * this screen stays a simple hub. All requests are signed with `fetchDpop`
+ * from `ensureSession`.
  */
 
 import {
@@ -12,7 +15,6 @@ import {
   on,
   type SerializableValue,
 } from "@remix-run/ui";
-import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
 
 export interface HomesPanelProps {
@@ -27,13 +29,6 @@ interface HomeWithRole {
   themeCss: string;
 }
 
-interface Member {
-  userId: string;
-  displayName: string;
-  isAgent: boolean;
-  role: "admin" | "member";
-}
-
 export const HomesPanel = clientEntry(
   "/homes_panel.js#HomesPanel",
   function HomesPanel(handle: Handle<HomesPanelProps>) {
@@ -41,47 +36,12 @@ export const HomesPanel = clientEntry(
     let userId: string | null = null;
     let error = "";
     let homes: HomeWithRole[] = [];
-    let selectedId: string | null = null;
-    let members: Member[] = [];
     let newHomeName = "";
-    let addUserId = "";
-    let fetchDpop: FetchDpop | null = null;
-    let inviteToken: string | null = null;
-    let inviteTimer: ReturnType<typeof setInterval> | null = null;
-    let inviteCopied = false;
     let joinCode = "";
-    let themeDraft = "";
-
-    /** The shareable invite URL for the current token. */
-    const inviteUrl = () =>
-      inviteToken && typeof location !== "undefined"
-        ? `${location.origin}/join/${inviteToken}`
-        : "";
-
-    /** Inject the selected home's custom CSS into a dedicated <style>. */
-    const applyTheme = (css: string) => {
-      if (typeof document === "undefined") return;
-      const id = "home-theme";
-      let el = document.getElementById(id) as HTMLStyleElement | null;
-      if (!css) {
-        el?.remove();
-        return;
-      }
-      if (!el) {
-        el = document.createElement("style");
-        el.id = id;
-        document.head.appendChild(el);
-      }
-      el.textContent = css;
-    };
-
-    const selectedRole = () => homes.find((h) => h.id === selectedId)?.role;
+    let fetchDpop: FetchDpop | null = null;
 
     /** Call a DPoP-protected JSON endpoint; throws on non-2xx with its error. */
-    const api = async (
-      path: string,
-      init?: RequestInit,
-    ): Promise<unknown> => {
+    const api = async (path: string, init?: RequestInit): Promise<unknown> => {
       const response = await fetchDpop!(path, init);
       const text = await response.text();
       const data = text ? JSON.parse(text) : {};
@@ -96,13 +56,6 @@ export const HomesPanel = clientEntry(
     const loadHomes = async () => {
       const data = await api("/api/homes") as { homes: HomeWithRole[] };
       homes = data.homes;
-    };
-
-    const loadMembers = async (homeId: string) => {
-      const data = await api(`/api/homes/${homeId}/members`) as {
-        members: Member[];
-      };
-      members = data.members;
     };
 
     const run = async (fn: () => Promise<void>) => {
@@ -131,76 +84,6 @@ export const HomesPanel = clientEntry(
         await loadHomes();
       });
 
-    const stopInviteHeartbeat = () => {
-      if (inviteTimer !== null) {
-        clearInterval(inviteTimer);
-        inviteTimer = null;
-      }
-      inviteToken = null;
-      inviteCopied = false;
-    };
-
-    const onCopyInvite = () =>
-      run(async () => {
-        const url = inviteUrl();
-        if (!url) return;
-        try {
-          await navigator.clipboard.writeText(url);
-          inviteCopied = true;
-        } catch {
-          inviteCopied = false;
-        }
-      });
-
-    const onSelect = (homeId: string) =>
-      run(async () => {
-        stopInviteHeartbeat();
-        selectedId = homeId;
-        const home = homes.find((h) => h.id === homeId);
-        themeDraft = home?.themeCss ?? "";
-        applyTheme(themeDraft);
-        await loadMembers(homeId);
-      });
-
-    const onSaveTheme = () =>
-      run(async () => {
-        if (!selectedId) return;
-        const data = await api(`/api/homes/${selectedId}/theme`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ css: themeDraft }),
-        }) as { themeCss: string };
-        themeDraft = data.themeCss; // server-sanitized
-        await loadHomes();
-        applyTheme(themeDraft);
-      });
-
-    const onInvite = () =>
-      run(async () => {
-        if (!selectedId) return;
-        const data = await api(`/api/homes/${selectedId}/invite`, {
-          method: "POST",
-        }) as { token: string };
-        inviteToken = data.token;
-        inviteCopied = false;
-        if (inviteTimer !== null) clearInterval(inviteTimer);
-        // Keep the token alive while the invite is shown (design: 60s TTL).
-        inviteTimer = setInterval(() => {
-          if (inviteToken && fetchDpop) {
-            fetchDpop(`/api/invites/${inviteToken}/heartbeat`, {
-              method: "POST",
-            }).catch(() => {});
-          }
-        }, 20_000);
-      });
-
-    const onCloseInvite = () =>
-      run(async () => {
-        const token = inviteToken;
-        stopInviteHeartbeat();
-        if (token) await api(`/api/invites/${token}`, { method: "DELETE" });
-      });
-
     const onJoin = () =>
       run(async () => {
         const code = joinCode.trim();
@@ -216,64 +99,13 @@ export const HomesPanel = clientEntry(
         await loadHomes();
       });
 
-    const onSetMyName = () =>
-      run(async () => {
-        if (!selectedId) return;
-        const me = members.find((m) => m.userId === userId);
-        const next = globalThis.prompt(
-          "このホームでの表示名",
-          me?.displayName ?? userId ?? "",
-        );
-        if (next == null) return;
-        await api(`/api/homes/${selectedId}/name`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: next }),
-        });
-        await loadMembers(selectedId);
-      });
-
-    const onAddMember = () =>
-      run(async () => {
-        const uid = addUserId.trim();
-        if (!uid || !selectedId) return;
-        await api(`/api/homes/${selectedId}/members`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: uid }),
-        });
-        addUserId = "";
-        await loadMembers(selectedId);
-      });
-
-    const onSetRole = (uid: string, role: "admin" | "member") =>
-      run(async () => {
-        await api(`/api/homes/${selectedId}/members/${uid}/role`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role }),
-        });
-        await loadMembers(selectedId!);
-        await loadHomes();
-      });
-
-    const onRemove = (uid: string) =>
-      run(async () => {
-        await api(`/api/homes/${selectedId}/members/${uid}`, {
-          method: "DELETE",
-        });
-        await loadMembers(selectedId!);
-      });
-
     if (typeof document !== "undefined") {
       (async () => {
         try {
           const session = await ensureSession(handle.props.idpOrigin);
           fetchDpop = session.fetchDpop;
           userId = session.userId;
-          if (userId) {
-            await loadHomes();
-          }
+          if (userId) await loadHomes();
         } catch (e) {
           error = (e as Error).message;
         } finally {
@@ -283,119 +115,6 @@ export const HomesPanel = clientEntry(
       })();
     }
 
-    const memberRow = (m: Member) => {
-      const isAdmin = selectedRole() === "admin";
-      const canManage = isAdmin && m.userId !== userId;
-      return (
-        <tr>
-          <td>
-            {m.displayName}
-            {m.isAgent ? <span class="badge badge-sm ml-1">agent</span> : null}
-            <div class="text-xs opacity-60">{m.userId}</div>
-          </td>
-          <td>
-            <span
-              class={`badge ${
-                m.role === "admin" ? "badge-primary" : "badge-ghost"
-              }`}
-            >
-              {m.role}
-            </span>
-          </td>
-          <td class="text-right">
-            {canManage
-              ? (
-                <div class="join">
-                  {m.role === "member"
-                    ? (
-                      <button
-                        type="button"
-                        class="btn btn-xs join-item"
-                        mix={[on("click", () => onSetRole(m.userId, "admin"))]}
-                      >
-                        admin に
-                      </button>
-                    )
-                    : (
-                      <button
-                        type="button"
-                        class="btn btn-xs join-item"
-                        mix={[on("click", () => onSetRole(m.userId, "member"))]}
-                      >
-                        member に
-                      </button>
-                    )}
-                  <button
-                    type="button"
-                    class="btn btn-xs btn-error join-item"
-                    mix={[on("click", () => onRemove(m.userId))]}
-                  >
-                    削除
-                  </button>
-                </div>
-              )
-              : null}
-          </td>
-        </tr>
-      );
-    };
-
-    /** The live invite: URL + scannable QR, valid while this screen is open. */
-    const inviteCard = () => {
-      const url = inviteUrl();
-      const { size, d } = qrPath(url);
-      const margin = 2;
-      const total = size + margin * 2;
-      return (
-        <div class="rounded-box border border-base-300 bg-base-100 p-3 space-y-3 max-w-xs">
-          <p class="text-xs opacity-60">
-            この画面を開いている間だけ有効な招待リンクです。相手のスマホで QR
-            を読み取るか、リンクを共有してください。
-          </p>
-          <div class="flex justify-center">
-            <svg
-              viewBox={`0 0 ${total} ${total}`}
-              class="w-44 h-44 rounded bg-white"
-              shape-rendering="crispEdges"
-              aria-label="招待QRコード"
-            >
-              <path
-                transform={`translate(${margin} ${margin})`}
-                d={d}
-                fill="#000"
-              />
-            </svg>
-          </div>
-          <div class="join w-full">
-            <input
-              class="input input-bordered input-sm join-item flex-1 font-mono text-xs"
-              readonly
-              value={url}
-              mix={[on("focus", (e) => {
-                (e.target as HTMLInputElement).select();
-              })]}
-            />
-            <button
-              type="button"
-              class="btn btn-sm join-item"
-              mix={[on("click", onCopyInvite)]}
-            >
-              {inviteCopied ? "コピー済み ✓" : "コピー"}
-            </button>
-          </div>
-          <div class="text-right">
-            <button
-              type="button"
-              class="btn btn-xs btn-ghost"
-              mix={[on("click", onCloseInvite)]}
-            >
-              招待を終了
-            </button>
-          </div>
-        </div>
-      );
-    };
-
     return () => {
       if (!ready) {
         return <div class="alert alert-soft">読み込み中…</div>;
@@ -404,7 +123,7 @@ export const HomesPanel = clientEntry(
         return (
           <div class="alert alert-soft">
             <span>
-              Home を使うにはサインインが必要です。{" "}
+              ホームを使うにはサインインが必要です。{" "}
               <a class="link" href="/signin" rmx-target="content">サインイン</a>
             </span>
           </div>
@@ -422,206 +141,94 @@ export const HomesPanel = clientEntry(
 
           <div class="card card-border bg-base-100">
             <div class="card-body">
-              <h2 class="card-title">Home を作成</h2>
-              <div class="join">
-                <input
-                  class="input input-bordered join-item"
-                  placeholder="Home の名前"
-                  value={newHomeName}
-                  mix={[on<HTMLInputElement>("input", (e) => {
-                    newHomeName = (e.target as HTMLInputElement).value;
-                    handle.update();
-                  })]}
-                />
-                <button
-                  type="button"
-                  class="btn btn-primary join-item"
-                  mix={[on("click", onCreate)]}
-                >
-                  作成
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="card card-border bg-base-100">
-            <div class="card-body">
-              <h2 class="card-title">あなたの Home</h2>
+              <h2 class="card-title">あなたのホーム</h2>
               {homes.length === 0
-                ? <p class="opacity-70">まだ Home がありません。</p>
+                ? (
+                  <p class="opacity-70">
+                    まだホームがありません。新しく作るか、招待コードで参加して
+                    ください。
+                  </p>
+                )
                 : (
                   <ul class="menu bg-base-200 rounded-box">
                     {homes.map((h) => (
                       <li>
-                        <div class="flex items-center justify-between gap-2">
-                          <a
-                            class="flex-1 font-medium link link-hover"
-                            href={`/home/${h.id}`}
-                          >
+                        <a
+                          class="flex items-center justify-between gap-2"
+                          href={`/home/${h.id}`}
+                        >
+                          <span class="flex-1 font-medium">
                             {h.name}
                             <span class="badge badge-sm ml-1">{h.role}</span>
-                          </a>
-                          <a
-                            class="btn btn-primary btn-xs"
-                            href={`/home/${h.id}`}
-                          >
-                            開く
-                          </a>
-                          <button
-                            type="button"
-                            class={`btn btn-ghost btn-xs ${
-                              selectedId === h.id ? "btn-active" : ""
-                            }`}
-                            mix={[on("click", () => onSelect(h.id))]}
-                          >
-                            管理
-                          </button>
-                        </div>
+                          </span>
+                          <span class="btn btn-primary btn-xs">開く →</span>
+                        </a>
                       </li>
                     ))}
                   </ul>
                 )}
-              <div class="divider my-1"></div>
-              <div class="join">
-                <input
-                  class="input input-bordered input-sm join-item"
-                  placeholder="招待コードで参加"
-                  value={joinCode}
-                  mix={[on<HTMLInputElement>("input", (e) => {
-                    joinCode = (e.target as HTMLInputElement).value;
-                    handle.update();
-                  })]}
-                />
-                <button
-                  type="button"
-                  class="btn btn-sm join-item"
-                  mix={[on("click", onJoin)]}
-                >
-                  参加
-                </button>
-              </div>
+              <p class="text-xs opacity-60 mt-2">
+                メンバー・テーマ・招待などの設定は、各ホームを開いた先の 「⚙
+                設定」で行います。
+              </p>
             </div>
           </div>
 
-          {selectedId
-            ? (
-              <div class="space-y-6">
-                <div class="card card-border bg-base-100">
-                  <div class="card-body">
-                    <div class="flex items-center justify-between">
-                      <h2 class="card-title">メンバー</h2>
-                      <button
-                        type="button"
-                        class="btn btn-ghost btn-xs"
-                        mix={[on("click", onSetMyName)]}
-                      >
-                        表示名を変更
-                      </button>
-                    </div>
-                    {selectedRole() === "admin"
-                      ? (
-                        <div class="join">
-                          <input
-                            class="input input-bordered input-sm join-item"
-                            placeholder="追加するユーザーの userId"
-                            value={addUserId}
-                            mix={[on<HTMLInputElement>("input", (e) => {
-                              addUserId = (e.target as HTMLInputElement).value;
-                              handle.update();
-                            })]}
-                          />
-                          <button
-                            type="button"
-                            class="btn btn-sm join-item"
-                            mix={[on("click", onAddMember)]}
-                          >
-                            メンバー追加
-                          </button>
-                        </div>
-                      )
-                      : null}
-                    {selectedRole() === "admin"
-                      ? (
-                        <div class="mt-2">
-                          {inviteToken ? inviteCard() : (
-                            <button
-                              type="button"
-                              class="btn btn-sm btn-outline"
-                              mix={[on("click", onInvite)]}
-                            >
-                              招待リンクを発行
-                            </button>
-                          )}
-                        </div>
-                      )
-                      : null}
-                    <table class="table">
-                      <thead>
-                        <tr>
-                          <th>ユーザー</th>
-                          <th>ロール</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>{members.map(memberRow)}</tbody>
-                    </table>
-                  </div>
+          <div class="grid gap-6 sm:grid-cols-2">
+            <div class="card card-border bg-base-100">
+              <div class="card-body">
+                <h2 class="card-title text-base">ホームを作成</h2>
+                <div class="join">
+                  <input
+                    class="input input-bordered input-sm join-item flex-1"
+                    placeholder="ホームの名前"
+                    value={newHomeName}
+                    mix={[on<HTMLInputElement>("input", (e) => {
+                      newHomeName = (e.target as HTMLInputElement).value;
+                      handle.update();
+                    })]}
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm join-item"
+                    mix={[on("click", onCreate)]}
+                  >
+                    作成
+                  </button>
                 </div>
-
-                {selectedRole() === "admin"
-                  ? (
-                    <div class="card card-border bg-base-100">
-                      <div class="card-body">
-                        <h2 class="card-title">テーマ（カスタム CSS）</h2>
-                        <p class="text-xs opacity-60">
-                          url() や @import
-                          などのネットワーク取得は保存時に無効化されます。
-                        </p>
-                        <textarea
-                          class="textarea textarea-bordered font-mono text-sm"
-                          rows={4}
-                          placeholder=".chat-bubble { background: #fde; }"
-                          value={themeDraft}
-                          mix={[on<HTMLTextAreaElement>("input", (e) => {
-                            themeDraft =
-                              (e.target as HTMLTextAreaElement).value;
-                            handle.update();
-                          })]}
-                        >
-                        </textarea>
-                        <div class="card-actions mt-2">
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-primary"
-                            mix={[on("click", onSaveTheme)]}
-                          >
-                            テーマを保存
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                  : null}
-
-                <div class="card card-border bg-base-100">
-                  <div class="card-body">
-                    <h2 class="card-title">チャット</h2>
-                    <p class="opacity-70">
-                      メインチャンネルとスレッドでの会話はチャット画面で行います。
-                    </p>
-                    <div class="card-actions">
-                      <a
-                        class="btn btn-primary"
-                        href={`/home/${selectedId}`}
-                      >
-                        このホームのチャットを開く →
-                      </a>
-                    </div>
-                  </div>
-                </div>
+                <p class="text-xs opacity-60">
+                  作成すると、あなたが最初の管理者になります。
+                </p>
               </div>
-            )
-            : null}
+            </div>
+
+            <div class="card card-border bg-base-100">
+              <div class="card-body">
+                <h2 class="card-title text-base">招待コードで参加</h2>
+                <div class="join">
+                  <input
+                    class="input input-bordered input-sm join-item flex-1"
+                    placeholder="招待コード"
+                    value={joinCode}
+                    mix={[on<HTMLInputElement>("input", (e) => {
+                      joinCode = (e.target as HTMLInputElement).value;
+                      handle.update();
+                    })]}
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm join-item"
+                    mix={[on("click", onJoin)]}
+                  >
+                    参加
+                  </button>
+                </div>
+                <p class="text-xs opacity-60">
+                  招待リンクを開けば、コード入力なしで参加できます。
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       );
     };
