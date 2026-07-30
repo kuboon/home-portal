@@ -3,11 +3,12 @@
  *
  * Flow:
  *  1. On load, bootstrap the DPoP session and ask the IdP who we are.
- *  2. If already signed in, redeem the token immediately and go to the home.
- *  3. If not, show a card naming the home with an optional display-name field
- *     and a passkey button. Signing in redirects to the IdP and back here;
- *     the display name is stashed in localStorage across that round trip so it
- *     survives the redirect, then applied when the token is redeemed.
+ *  2. Signed out → show the invite card with just a passkey button (no display
+ *     name yet: asking before sign-in means typing a name you might never use,
+ *     and we can't prefill it until the IdP tells us who you are). Signing in
+ *     redirects to the IdP and back to this same URL.
+ *  3. Signed in → ask for the display name, prefilled with what the IdP gave
+ *     us, then redeem the token with it and go to the home.
  *
  * The token is only live while the inviting admin keeps the invite screen open
  * (60s TTL kept alive by a heartbeat), so redemption can fail if they've since
@@ -36,9 +37,9 @@ export const JoinPanel = clientEntry(
   "/join_panel.js#JoinPanel",
   function JoinPanel(handle: Handle<JoinPanelProps>) {
     const { idpOrigin, token, homeName, valid } = handle.props;
-    const nameKey = `join_name_${token}`;
 
     let ready = false;
+    let signedIn = false;
     let joining = false;
     let done = false;
     let error = "";
@@ -47,20 +48,15 @@ export const JoinPanel = clientEntry(
     let fetchDpop: FetchDpop | null = null;
 
     const accept = async () => {
+      const name = nameDraft.trim();
       joining = true;
+      error = "";
       handle.update();
       try {
-        const stored = (() => {
-          try {
-            return globalThis.localStorage?.getItem(nameKey) ?? "";
-          } catch {
-            return "";
-          }
-        })();
         const response = await fetchDpop!(`/api/invites/${token}/accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(stored ? { displayName: stored } : {}),
+          body: JSON.stringify(name ? { displayName: name } : {}),
         });
         const text = await response.text();
         const data = text ? JSON.parse(text) : {};
@@ -69,9 +65,6 @@ export const JoinPanel = clientEntry(
             (data as { error?: string }).error ?? "参加に失敗しました",
           );
         }
-        try {
-          globalThis.localStorage?.removeItem(nameKey);
-        } catch { /* ignore */ }
         const home = (data as { home?: { id: string } }).home;
         done = true;
         handle.update();
@@ -86,15 +79,8 @@ export const JoinPanel = clientEntry(
     };
 
     // Redirect to the IdP for passkey sign-in / sign-up, returning to this same
-    // invite URL so we can redeem the token once signed in.
+    // invite URL so we come back here signed in and can ask for the name.
     const onSignin = () => {
-      try {
-        if (nameDraft.trim()) {
-          globalThis.localStorage?.setItem(nameKey, nameDraft.trim());
-        } else {
-          globalThis.localStorage?.removeItem(nameKey);
-        }
-      } catch { /* ignore */ }
       const params = new URLSearchParams({
         dpop_jkt: thumbprint,
         redirect_uri: globalThis.location.href,
@@ -108,13 +94,9 @@ export const JoinPanel = clientEntry(
           const session = await ensureSession(idpOrigin);
           fetchDpop = session.fetchDpop;
           thumbprint = session.thumbprint;
-          try {
-            nameDraft = globalThis.localStorage?.getItem(nameKey) ?? "";
-          } catch { /* ignore */ }
-          if (session.userId && valid) {
-            // Signed in and the token is live → join straight away.
-            await accept();
-          }
+          signedIn = session.userId != null;
+          // Prefill with what the IdP gave us so the user can just confirm.
+          nameDraft = session.displayName ?? "";
         } catch (e) {
           error = (e as Error).message;
         } finally {
@@ -155,6 +137,45 @@ export const JoinPanel = clientEntry(
             <p class="opacity-70 text-sm">参加しています…</p>
           </div>
         )
+        : signedIn
+        ? (
+          // Signed in: ask for the display name (prefilled from the IdP) and
+          // redeem the token with it.
+          <div class="flex flex-col items-center gap-4 w-full">
+            <div class="text-4xl">🏠</div>
+            <h1 class="card-title text-xl">「{homeName}」に参加</h1>
+            <p class="opacity-70 text-sm">
+              このホームでの表示名を決めてください。あとから変更できます。
+            </p>
+            <div class="w-full text-left">
+              <label class="text-sm opacity-70">表示名</label>
+              <input
+                class="input input-bordered w-full mt-1"
+                placeholder="このホームでの表示名"
+                value={nameDraft}
+                mix={[
+                  on("input", (e) => {
+                    nameDraft = (e.target as HTMLInputElement).value;
+                    handle.update();
+                  }),
+                  on("keydown", (e) => {
+                    if (e.key === "Enter" && !e.isComposing) {
+                      e.preventDefault();
+                      accept();
+                    }
+                  }),
+                ]}
+              />
+            </div>
+            <button
+              type="button"
+              class="btn btn-primary w-full"
+              mix={[on("click", () => accept())]}
+            >
+              参加する
+            </button>
+          </div>
+        )
         : (
           <div class="flex flex-col items-center gap-4 w-full">
             <div class="text-4xl">🏠</div>
@@ -162,18 +183,6 @@ export const JoinPanel = clientEntry(
             <p class="opacity-70 text-sm">
               パスキーでサインイン／新規登録すると、このホームに参加できます。
             </p>
-            <div class="w-full text-left">
-              <label class="text-sm opacity-70">表示名（任意）</label>
-              <input
-                class="input input-bordered w-full mt-1"
-                placeholder="このホームでの表示名"
-                value={nameDraft}
-                mix={[on("input", (e) => {
-                  nameDraft = (e.target as HTMLInputElement).value;
-                  handle.update();
-                })]}
-              />
-            </div>
             <button
               type="button"
               class="btn btn-primary w-full"

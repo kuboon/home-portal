@@ -28,6 +28,14 @@ export interface Session {
    * storage.kbn.one's upload/download API for stamp images.
    */
   accessToken: string | null;
+  /**
+   * The signed-in user's display name: the IdP's `nickname` when they've set
+   * one, else our `users` row's display name (which the IdP identity seeds, so
+   * it ends up being the userId). `null` when signed out. Callers use it to
+   * prefill a display-name field rather than making the user type from
+   * scratch.
+   */
+  displayName: string | null;
 }
 
 export async function ensureSession(idpOrigin: string): Promise<Session> {
@@ -35,6 +43,7 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
 
   let userId: string | null = null;
   let jws: string | null = null;
+  let displayName: string | null = null;
   // Probing the IdP must never sink the whole bootstrap: a network/CORS error
   // or a non-OK response just means "not signed in". We still return the
   // `thumbprint` from init() so callers can start the `/authorize` sign-in
@@ -45,9 +54,14 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
       const data = await response.json() as {
         userId: string | null;
         jws?: string;
+        nickname?: string | null;
       };
       userId = data.userId ?? null;
       jws = data.jws ?? null;
+      // The IdP's user-level nickname (null when they haven't set one). It also
+      // rides on the `jws` as a claim, but this is only ever a UI default, so
+      // reading the plain field is fine.
+      displayName = data.nickname?.trim() || null;
     }
   } catch {
     // Leave userId/jws null → treated as signed-out.
@@ -57,12 +71,22 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
     // Bind the IdP identity to this DPoP session + ensure the users row. We
     // forward the IdP's signed, DPoP-bound token; the server verifies it
     // rather than trusting a self-reported userId.
-    await fetchDpop("/api/users/sync", {
+    const synced = await fetchDpop("/api/users/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jws }),
-    }).catch(() => {});
+      // Carry the IdP nickname through so the `users` row reflects it instead
+      // of falling back to the bare userId.
+      body: JSON.stringify(displayName ? { jws, displayName } : { jws }),
+    }).catch(() => null);
+    // No nickname at the IdP → fall back to the `users` row's display name
+    // (seeded from the IdP identity) so callers still get a sane default.
+    if (!displayName && synced?.ok) {
+      const data = await synced.json().catch(() => null) as
+        | { user?: { displayName?: string } }
+        | null;
+      displayName = data?.user?.displayName ?? null;
+    }
   }
 
-  return { fetchDpop, thumbprint, userId, accessToken: jws };
+  return { fetchDpop, thumbprint, userId, accessToken: jws, displayName };
 }
