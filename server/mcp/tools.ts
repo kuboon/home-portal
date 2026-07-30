@@ -23,7 +23,7 @@ import {
   toggleReaction,
   touchStamp,
 } from "@scope/db";
-import { signalThread } from "../realtime.ts";
+import { signalMainChannel, signalThread } from "../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../rate_limit.ts";
 import { notifyNewMessage } from "../notify.ts";
 
@@ -156,15 +156,30 @@ export const tools: McpTool[] = [
   },
   {
     name: "post_message",
-    description: "Post a message to a thread.",
+    description:
+      "Post a message. Give `threadId` to post in a thread, or `homeId` to " +
+      "post in that home's main channel.",
     inputSchema: {
       type: "object",
-      properties: { threadId: { type: "string" }, body: { type: "string" } },
-      required: ["threadId", "body"],
+      properties: {
+        threadId: {
+          type: "string",
+          description: "Target thread. Omit to post to the main channel.",
+        },
+        homeId: {
+          type: "string",
+          description: "Target home, for a main-channel post.",
+        },
+        body: { type: "string" },
+      },
+      required: ["body"],
     },
     async handler(agentId, args) {
-      const threadId = str(args, "threadId");
-      const homeId = await homeIdOfThread(threadId);
+      // Either a thread (threadId) or the home's main channel (homeId).
+      const threadId = optStr(args, "threadId") || null;
+      const homeId = threadId
+        ? await homeIdOfThread(threadId)
+        : str(args, "homeId");
       await requireMember(homeId, agentId);
       if (!(await checkPostLimit(agentId))) throw new ToolError("rate limited");
       try {
@@ -174,7 +189,8 @@ export const tools: McpTool[] = [
           authorId: agentId,
           body: str(args, "body"),
         });
-        await signalThread(threadId);
+        if (threadId) await signalThread(threadId);
+        else await signalMainChannel(homeId);
         await notifyNewMessage({
           homeId,
           threadId,
