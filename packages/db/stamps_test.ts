@@ -102,6 +102,12 @@ Deno.test("library caps at MAX_LIBRARY_STAMPS with LRU eviction", async () => {
   // …but the evicted stamp itself still exists (messages may reference it).
   assert(await getStamp(ids[0]));
 
+  // Pin `extra`'s recency to the past before touching another entry. Both
+  // would otherwise be stamped by the same `NOW_MS` when the two statements
+  // land in one millisecond, and the tie-break (added_at / id DESC) would keep
+  // the newer `extra` in front — a flake that only shows up on a fast machine.
+  await setLastUsed("alice", extra.id, "2026-01-01 00:01:00");
+
   // Re-using an old entry moves it to the front instead of adding.
   await touchStamp("alice", ids[5]);
   lib = await listLibrary("alice");
