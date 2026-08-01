@@ -1121,10 +1121,18 @@ export const ChatPanel = clientEntry(
           thumbprint = session.thumbprint;
           accessToken = session.accessToken;
           if (userId) {
-            await loadHome();
-            await loadThreads();
-            await loadMessages();
-            await loadRecentEmojis();
+            // 4 本は互いに独立なので並列に投げる（直列だと初期表示までに
+            // 往復が 4 回積み上がり、肝心のメッセージが最後に届く）。
+            // allSettled で全ての rejection を拾ってから、配列順＝
+            // loadHome の「このホームにアクセスできません」を優先して投げる。
+            const results = await Promise.allSettled([
+              loadHome(),
+              loadThreads(),
+              loadMessages(),
+              loadRecentEmojis(),
+            ]);
+            const failed = results.find((r) => r.status === "rejected");
+            if (failed) throw (failed as PromiseRejectedResult).reason;
             startStream(currentThreadId);
             // ホームを開けたら、必要なら A2HS 案内をポップアップ。
             maybePromptA2hs(homeId);
