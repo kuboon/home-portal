@@ -45,6 +45,26 @@ Deno.test("tools/call surfaces a missing-arg ToolError as isError", async () => 
   assert(res.result.content[0].text.includes("homeId"));
 });
 
+Deno.test("post_message accepts a thread or a home, but needs one of them", async () => {
+  const tools = (await call("tools/list")).result.tools as {
+    name: string;
+    inputSchema: { required?: string[]; properties: Record<string, unknown> };
+  }[];
+  const post = tools.find((t) => t.name === "post_message")!;
+  // Only the body is mandatory: threadId (thread) / homeId (main channel) pick
+  // the target, so an agent isn't forced to create a thread just to speak.
+  assertEquals(post.inputSchema.required, ["body"]);
+  assert("homeId" in post.inputSchema.properties);
+
+  // With neither target, the homeId check is what reports the problem.
+  const res = await call("tools/call", {
+    name: "post_message",
+    arguments: { body: "hi" },
+  });
+  assertEquals(res.result.isError, true);
+  assert(res.result.content[0].text.includes("homeId"));
+});
+
 Deno.test("unknown method returns method-not-found", async () => {
   const res = await call("does/not/exist");
   assertEquals(res.error.code, -32601);

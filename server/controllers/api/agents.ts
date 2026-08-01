@@ -3,15 +3,20 @@
  *
  * An agent is a user (`is_agent = 1`) owned by the caller, authenticating to
  * the MCP server with a bearer token. The token is returned once at creation
- * (only its hash is stored). To let an agent act in a home, add it as a member
- * by its agent id (same as adding any user); its per-home role applies.
+ * (only its hash is stored). Per-home role is via `memberships`, like any user.
+ *
+ * `POST /api/agents` takes an optional `homeId`: the agent is then added to
+ * that home in the same request (the caller must be its admin), so creating an
+ * agent from a home's settings needs no separate "add by id" step.
  */
 
 import type { Controller } from "@remix-run/fetch-router";
 
 import {
+  addMember,
   createAgent,
   deleteAgent,
+  getRole,
   HomeError,
   listAgentsByOwner,
 } from "@scope/db";
@@ -38,14 +43,25 @@ export const agentsController = {
     async create(context) {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
-      const body = await context.request.json() as { displayName?: string };
+      const body = await context.request.json() as {
+        displayName?: string;
+        homeId?: string;
+      };
+      const homeId = body.homeId?.trim();
+      // Adding a member is an admin action, so check before creating anything.
+      if (homeId && await getRole(homeId, userId) !== "admin") {
+        return Response.json({ error: "admin only" }, { status: 403 });
+      }
       try {
         const { agent, token } = await createAgent({
           ownerId: userId,
           displayName: body.displayName ?? "",
         });
+        if (homeId) await addMember(homeId, agent.id, "member");
         // `token` is returned only here; only its hash is stored.
-        return Response.json({ agent, token }, { status: 201 });
+        return Response.json({ agent, token, homeId: homeId ?? null }, {
+          status: 201,
+        });
       } catch (error) {
         if (error instanceof HomeError) {
           return Response.json({ error: error.message }, {

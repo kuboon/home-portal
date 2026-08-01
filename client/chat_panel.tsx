@@ -282,6 +282,14 @@ export const ChatPanel = clientEntry(
     let nameDraft = "";
     let members: Member[] = [];
     let addUserId = "";
+    // Agents (MCP) managed from inside this home: the caller's own agents plus
+    // the name/選択 drafts and the token shown once after creation.
+    let myAgents: { id: string; displayName: string }[] = [];
+    let agentNameDraft = "";
+    let pickedAgentId = "";
+    let issuedAgent: { id: string; displayName: string; token: string } | null =
+      null;
+    let agentTokenCopied = false;
     let themeDraft = "";
     let inviteToken: string | null = null;
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
@@ -714,9 +722,13 @@ export const ChatPanel = clientEntry(
         closeDrawer();
         await loadMembers();
         await loadStamps();
+        // Own agents, for the "add an existing agent" picker (admins only see
+        // the section, but the list is the caller's own either way).
+        await loadMyAgents().catch(() => {});
         nameDraft = members.find((m) => m.userId === userId)?.displayName ??
           userId ?? "";
         themeDraft = themeCss;
+        issuedAgent = null;
         settingsOpen = true;
       });
 
@@ -749,6 +761,68 @@ export const ChatPanel = clientEntry(
         });
         addUserId = "";
         await loadMembers();
+      });
+
+    const loadMyAgents = async () => {
+      const data = await api("/api/agents") as {
+        agents: { id: string; displayName: string }[];
+      };
+      myAgents = data.agents;
+    };
+
+    /** The caller's agents that aren't in this home yet. */
+    const joinableAgents = () => {
+      const here = new Set(members.map((m) => m.userId));
+      return myAgents.filter((a) => !here.has(a.id));
+    };
+
+    /**
+     * Create an agent and add it to this home in one step (the server does the
+     * membership), then show its token once. No copying ids around.
+     */
+    const onCreateAgent = () =>
+      run(async () => {
+        const displayName = agentNameDraft.trim();
+        if (!displayName) return;
+        const data = await api("/api/agents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ displayName, homeId }),
+        }) as { agent: { id: string; displayName: string }; token: string };
+        agentNameDraft = "";
+        agentTokenCopied = false;
+        issuedAgent = {
+          id: data.agent.id,
+          displayName: data.agent.displayName,
+          token: data.token,
+        };
+        await loadMyAgents();
+        await loadMembers();
+      });
+
+    /** Add one of the caller's existing agents to this home. */
+    const onAddExistingAgent = () =>
+      run(async () => {
+        const agentId = pickedAgentId;
+        if (!agentId) return;
+        await api(`/api/homes/${homeId}/members`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: agentId }),
+        });
+        pickedAgentId = "";
+        await loadMembers();
+      });
+
+    const onCopyAgentToken = () =>
+      run(async () => {
+        if (!issuedAgent) return;
+        try {
+          await navigator.clipboard.writeText(issuedAgent.token);
+          agentTokenCopied = true;
+        } catch {
+          agentTokenCopied = false;
+        }
       });
 
     const onSetRole = (uid: string, r: "admin" | "member") =>
@@ -1047,10 +1121,18 @@ export const ChatPanel = clientEntry(
           thumbprint = session.thumbprint;
           accessToken = session.accessToken;
           if (userId) {
-            await loadHome();
-            await loadThreads();
-            await loadMessages();
-            await loadRecentEmojis();
+            // 4 本は互いに独立なので並列に投げる（直列だと初期表示までに
+            // 往復が 4 回積み上がり、肝心のメッセージが最後に届く）。
+            // allSettled で全ての rejection を拾ってから、配列順＝
+            // loadHome の「このホームにアクセスできません」を優先して投げる。
+            const results = await Promise.allSettled([
+              loadHome(),
+              loadThreads(),
+              loadMessages(),
+              loadRecentEmojis(),
+            ]);
+            const failed = results.find((r) => r.status === "rejected");
+            if (failed) throw (failed as PromiseRejectedResult).reason;
             startStream(currentThreadId);
             // ホームを開けたら、必要なら A2HS 案内をポップアップ。
             maybePromptA2hs(homeId);
@@ -1744,8 +1826,9 @@ export const ChatPanel = clientEntry(
                 </a>
               </div>
               <p class="text-xs opacity-50 mt-1">
-                通知の受信登録とこのアプリのホーム画面追加、AI
-                エージェント（MCP）の作成・トークン発行はこちら。
+                通知の受信登録とこのアプリのホーム画面追加、エージェントの
+                トークン再発行・失効はこちら。エージェントの作成は「ホームの
+                設定」から行うと、このホームへの追加まで済みます。
               </p>
             </div>
           </div>
@@ -1834,6 +1917,130 @@ export const ChatPanel = clientEntry(
       );
     };
 
+    /**
+     * Agents (MCP) for this home. Creating one joins it here in the same
+     * request, and an agent already owned by the caller can be added straight
+     * from the picker — the admin never copies an agent id by hand.
+     */
+    const agentSettings = () => {
+      const joinable = joinableAgents();
+      return (
+        <div>
+          <h4 class="font-semibold text-sm">AI エージェント（MCP）</h4>
+          <p class="text-xs opacity-60">
+            作成するとこのホームのメンバーになります。トークンを MCP
+            クライアントに設定すると、このホームで発言できます。
+          </p>
+
+          <div class="join w-full mt-2">
+            <input
+              class="input input-bordered input-sm join-item flex-1"
+              placeholder="エージェントの表示名"
+              value={agentNameDraft}
+              mix={[
+                on<HTMLInputElement>("input", (e) => {
+                  agentNameDraft = (e.target as HTMLInputElement).value;
+                  handle.update();
+                }),
+                on("keydown", (e) => {
+                  if (e.key === "Enter" && !e.isComposing) {
+                    e.preventDefault();
+                    onCreateAgent();
+                  }
+                }),
+              ]}
+            />
+            <button
+              type="button"
+              class="btn btn-sm btn-primary join-item"
+              disabled={!agentNameDraft.trim()}
+              mix={[on("click", onCreateAgent)]}
+            >
+              作成して追加
+            </button>
+          </div>
+
+          {joinable.length > 0
+            ? (
+              <div class="join w-full mt-2">
+                <select
+                  class="select select-bordered select-sm join-item flex-1"
+                  value={pickedAgentId}
+                  mix={[on<HTMLSelectElement>("change", (e) => {
+                    pickedAgentId = (e.target as HTMLSelectElement).value;
+                    handle.update();
+                  })]}
+                >
+                  <option value="">既存のエージェントを選ぶ…</option>
+                  {joinable.map((a) => (
+                    <option key={a.id} value={a.id}>{a.displayName}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  class="btn btn-sm join-item"
+                  disabled={!pickedAgentId}
+                  mix={[on("click", onAddExistingAgent)]}
+                >
+                  このホームに追加
+                </button>
+              </div>
+            )
+            : null}
+
+          {issuedAgent ? agentTokenCard(issuedAgent) : null}
+
+          <p class="text-xs opacity-50 mt-2">
+            トークンの再発行・失効は{" "}
+            <a class="link" href="/agents">エージェント管理</a>{" "}
+            から。エージェントはメンバー一覧に{" "}
+            <span class="badge badge-xs">
+              agent
+            </span>{" "}
+            付きで並びます。
+          </p>
+        </div>
+      );
+    };
+
+    /** The one-time token + ready-to-paste MCP client setup. */
+    const agentTokenCard = (
+      agent: { id: string; displayName: string; token: string },
+    ) => (
+      <div class="rounded-box border border-success/40 bg-success/10 p-3 mt-2 space-y-2">
+        <p class="text-sm font-semibold">
+          「{agent.displayName}」を追加しました
+        </p>
+        <p class="text-xs opacity-70">
+          トークンは<strong>この画面でだけ</strong>表示されます。MCP
+          クライアントに設定してください。
+        </p>
+        <div class="join w-full">
+          <input
+            class="input input-bordered input-sm join-item flex-1 font-mono text-xs"
+            readonly
+            value={agent.token}
+            mix={[on("focus", (e) => {
+              (e.target as HTMLInputElement).select();
+            })]}
+          />
+          <button
+            type="button"
+            class="btn btn-sm join-item"
+            mix={[on("click", onCopyAgentToken)]}
+          >
+            {agentTokenCopied ? "コピー済み ✓" : "コピー"}
+          </button>
+        </div>
+        <div>
+          <p class="text-xs opacity-70">Claude Code なら:</p>
+          <pre class="text-[11px] bg-base-300 rounded p-2 mt-1 overflow-x-auto"><code>{`claude mcp add --transport http home-portal ${
+            typeof location !== "undefined" ? location.origin : ""
+          }/mcp --header "Authorization: Bearer ${agent.token}"`}</code></pre>
+        </div>
+      </div>
+    );
+
     const homeSettings = () => (
       <div class="space-y-4 mt-2">
         <div>
@@ -1878,6 +2085,8 @@ export const ChatPanel = clientEntry(
           </thead>
           <tbody>{members.map(memberRow)}</tbody>
         </table>
+
+        {agentSettings()}
 
         <div>
           <h4 class="font-semibold text-sm">テーマ（カスタム CSS）</h4>
