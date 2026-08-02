@@ -94,5 +94,6 @@ export {
   createAgent,
   deleteAgent,
   getAgentIdByToken,
+  getAgentOwner,
   listAgentsByOwner,
 } from "./agents.ts";

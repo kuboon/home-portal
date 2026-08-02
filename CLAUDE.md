@@ -88,15 +88,17 @@ admin のカスタム CSS、url()/@import 等のネットワーク取得は無�
 スレッド×ユーザーの指数バックオフ付きで配信）+
 **エージェント・アカウント**（人間が 所有する `is_agent` ユーザーを作成し MCP 用
 Bearer トークンを発行。Home には id 指定で メンバー追加）+ **MCP
-サーバ**（`POST /mcp`、 JSON-RPC。Bearer
-トークンでエージェント認証し、list/post/thread/repost/react など Web UI
-同等のツールを人間と同じロール・レート制限で実行）+
-**スタンプ（ステッカー）**（画像は storage.kbn.one にブラウザ直アップロード、
-`kind='stamp'` の単独 post、ライブラリ 20 件 LRU・ホーム共有・使用時自動追加、
-picker/設定 UI、MCP `list_stamps`/`post_stamp`）+ **画像
-post（添付）**（本文に画像 1 枚を添付。storage.kbn.one に直アップロード、
-`messages.image_key` に object key を保存、10MB・最大辺 4096px でクライアント
-検証・縮小、composer 添付 UI・タイムライン描画・repost サムネイル。画像付き post
-は編集不可。**7 日で自動削除**＝`?expireDays=7` で storage の `expire-at`
-を記録し 日次 cron が削除、UI に「M/D
-に削除されます」表示）まで実装済み。設計の全スコープを一巡。
+サーバ**（`POST /mcp/:agentId`、 JSON-RPC。id.kbn.one の OAuth 2.1 / CIMD
+アクセストークン（`aud` がそのエンドポイント。所有者のみ許可）か、エージェント
+の `hpa_` トークンで認証し、list/post/thread/repost/react など Web UI
+同等のツールを人間と同じロール・レート制限で実行。401 は RFC 9728 の
+`WWW-Authenticate` を返し、`/.well-known/oauth-protected-resource/mcp/:agentId`
+で認可サーバを案内）+ **スタンプ（ステッカー）**（画像は storage.kbn.one
+にブラウザ直アップロード、 `kind='stamp'` の単独 post、ライブラリ 20 件
+LRU・ホーム共有・使用時自動追加、 picker/設定 UI、MCP
+`list_stamps`/`post_stamp`）+ **画像 post（添付）**（本文に画像 1
+枚を添付。storage.kbn.one に直アップロード、 `messages.image_key` に object key
+を保存、10MB・最大辺 4096px でクライアント 検証・縮小、composer 添付
+UI・タイムライン描画・repost サムネイル。画像付き post は編集不可。**7
+日で自動削除**＝`?expireDays=7` で storage の `expire-at` を記録し 日次 cron
+が削除、UI に「M/D に削除されます」表示）まで実装済み。設計の全スコープを一巡。

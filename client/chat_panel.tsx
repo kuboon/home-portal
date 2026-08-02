@@ -1928,8 +1928,8 @@ export const ChatPanel = clientEntry(
         <div>
           <h4 class="font-semibold text-sm">AI エージェント（MCP）</h4>
           <p class="text-xs opacity-60">
-            作成するとこのホームのメンバーになります。トークンを MCP
-            クライアントに設定すると、このホームで発言できます。
+            作成するとこのホームのメンバーになります。表示される MCP
+            エンドポイントをクライアントに設定すると、このホームで発言できます。
           </p>
 
           <div class="join w-full mt-2">
@@ -1988,7 +1988,20 @@ export const ChatPanel = clientEntry(
             )
             : null}
 
-          {issuedAgent ? agentTokenCard(issuedAgent) : null}
+          {issuedAgent ? agentSetupCard(issuedAgent) : null}
+
+          {members
+            .filter((m) => m.isAgent && m.userId !== issuedAgent?.id)
+            .map((m) => (
+              <details key={m.userId} class="text-xs mt-2">
+                <summary class="cursor-pointer opacity-70">
+                  {m.displayName} の MCP エンドポイント
+                </summary>
+                <pre class="text-[11px] bg-base-300 rounded p-2 mt-1 overflow-x-auto"><code>{`claude mcp add --transport http home-portal ${
+                  mcpEndpoint(m.userId)
+                }`}</code></pre>
+              </details>
+            ))}
 
           <p class="text-xs opacity-50 mt-2">
             トークンの再発行・失効は{" "}
@@ -2003,41 +2016,64 @@ export const ChatPanel = clientEntry(
       );
     };
 
-    /** The one-time token + ready-to-paste MCP client setup. */
-    const agentTokenCard = (
-      agent: { id: string; displayName: string; token: string },
+    /** This agent's own MCP endpoint. The agent id is not a secret. */
+    const mcpEndpoint = (agentId: string) =>
+      `${
+        typeof location !== "undefined" ? location.origin : ""
+      }/mcp/${agentId}`;
+
+    /**
+     * Ready-to-paste MCP client setup. The endpoint alone is enough: the
+     * client is sent to id.kbn.one to sign in, and the owner's approval is
+     * what lets it speak as this agent. The `hpa_` token stays for bots with
+     * no browser to run that flow.
+     */
+    const agentSetupCard = (
+      agent: { id: string; displayName: string; token?: string },
     ) => (
       <div class="rounded-box border border-success/40 bg-success/10 p-3 mt-2 space-y-2">
         <p class="text-sm font-semibold">
-          「{agent.displayName}」を追加しました
+          「{agent.displayName}」の MCP 設定
         </p>
         <p class="text-xs opacity-70">
-          トークンは<strong>この画面でだけ</strong>表示されます。MCP
-          クライアントに設定してください。
+          このコマンドを実行すると、初回接続時にブラウザで id.kbn.one
+          にサインインして許可を求められます。
         </p>
-        <div class="join w-full">
-          <input
-            class="input input-bordered input-sm join-item flex-1 font-mono text-xs"
-            readonly
-            value={agent.token}
-            mix={[on("focus", (e) => {
-              (e.target as HTMLInputElement).select();
-            })]}
-          />
-          <button
-            type="button"
-            class="btn btn-sm join-item"
-            mix={[on("click", onCopyAgentToken)]}
-          >
-            {agentTokenCopied ? "コピー済み ✓" : "コピー"}
-          </button>
-        </div>
-        <div>
-          <p class="text-xs opacity-70">Claude Code なら:</p>
-          <pre class="text-[11px] bg-base-300 rounded p-2 mt-1 overflow-x-auto"><code>{`claude mcp add --transport http home-portal ${
-            typeof location !== "undefined" ? location.origin : ""
-          }/mcp --header "Authorization: Bearer ${agent.token}"`}</code></pre>
-        </div>
+        <pre class="text-[11px] bg-base-300 rounded p-2 overflow-x-auto"><code>{`claude mcp add --transport http home-portal ${
+          mcpEndpoint(agent.id)
+        }`}</code></pre>
+        {agent.token
+          ? (
+            <details class="text-xs">
+              <summary class="cursor-pointer opacity-70">
+                ブラウザを開けない常時稼働のボット向け（トークン）
+              </summary>
+              <p class="opacity-70 mt-2">
+                トークンは<strong>この画面でだけ</strong>表示されます。
+              </p>
+              <div class="join w-full mt-1">
+                <input
+                  class="input input-bordered input-sm join-item flex-1 font-mono text-xs"
+                  readonly
+                  value={agent.token}
+                  mix={[on("focus", (e) => {
+                    (e.target as HTMLInputElement).select();
+                  })]}
+                />
+                <button
+                  type="button"
+                  class="btn btn-sm join-item"
+                  mix={[on("click", onCopyAgentToken)]}
+                >
+                  {agentTokenCopied ? "コピー済み ✓" : "コピー"}
+                </button>
+              </div>
+              <pre class="text-[11px] bg-base-300 rounded p-2 mt-1 overflow-x-auto"><code>{`claude mcp add --transport http home-portal ${
+                mcpEndpoint(agent.id)
+              } --header "Authorization: Bearer ${agent.token}"`}</code></pre>
+            </details>
+          )
+          : null}
       </div>
     );
 
