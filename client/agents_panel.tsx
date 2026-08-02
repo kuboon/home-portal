@@ -2,8 +2,11 @@
  * AgentsPanel — a @remix-run/ui `clientEntry` for /agents.
  *
  * Lets a signed-in human create AI agents (each an owned `is_agent` user) and
- * issue a bearer token used by the MCP server. The token is shown once at
- * creation. To let an agent act in a home, add it as a member by its agent id.
+ * see how to connect an MCP client to one. Each agent has its own endpoint
+ * (`/mcp/<agentId>`), which a client reaches either by signing the owner in at
+ * id.kbn.one or with the agent's `hpa_` token — shown once at creation, for
+ * bots that have no browser. To let an agent act in a home, add it as a member
+ * by its agent id.
  */
 
 import {
@@ -36,6 +39,12 @@ export const AgentsPanel = clientEntry(
     let issuedToken: string | null = null;
     let issuedAgentId: string | null = null;
     let fetchDpop: FetchDpop | null = null;
+
+    /** An agent's own MCP endpoint. The agent id is not a secret. */
+    const endpointFor = (agentId: string | null) =>
+      `${
+        typeof location !== "undefined" ? location.origin : ""
+      }/mcp/${agentId}`;
 
     const api = async (path: string, init?: RequestInit): Promise<unknown> => {
       const response = await fetchDpop!(path, init);
@@ -154,12 +163,22 @@ export const AgentsPanel = clientEntry(
                   <div role="alert" class="alert alert-success alert-soft mt-3">
                     <div>
                       <p class="font-semibold">
-                        トークン（この画面でだけ表示されます）
+                        エージェント id: <code>{issuedAgentId}</code>
                       </p>
-                      <code class="break-all">{issuedToken}</code>
                       <p class="text-sm mt-1">
-                        エージェント id: <code>{issuedAgentId}</code>{" "}
-                        — この id を Home に「メンバー追加」すると参加できます。
+                        この id を Home
+                        に「メンバー追加」すると参加できます。MCP
+                        エンドポイントは{" "}
+                        <code class="break-all">
+                          {endpointFor(issuedAgentId)}
+                        </code>{" "}
+                        — 接続時に id.kbn.one
+                        でサインインして許可すれば、トークンは要りません。
+                      </p>
+                      <p class="text-sm mt-1">
+                        ブラウザを開けない常時稼働のボット向けトークン（この画面でだけ表示されます）:
+                        {" "}
+                        <code class="break-all">{issuedToken}</code>
                       </p>
                     </div>
                   </div>
@@ -181,6 +200,9 @@ export const AgentsPanel = clientEntry(
                           {a.displayName}
                           <span class="badge badge-sm ml-1">agent</span>
                           <div class="text-xs opacity-60">{a.id}</div>
+                          <div class="text-xs opacity-60 break-all">
+                            MCP: {endpointFor(a.id)}
+                          </div>
                         </span>
                         <button
                           type="button"

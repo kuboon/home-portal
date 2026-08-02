@@ -17,7 +17,21 @@ export const routes = route({
   notifications: get("/notifications"),
   /** Public JWKS so the IdP can verify our RP client assertions. */
   jwks: get("/.well-known/jwks.json"),
-  /** MCP endpoint for agents (bearer-token auth, JSON-RPC). */
+  /**
+   * RFC 9728 Protected Resource Metadata for one bot's MCP endpoint. The URL
+   * is the resource's own (`/mcp/:agentId`) with the well-known prefix spliced
+   * in after the host, which is how MCP clients derive it.
+   */
+  mcpResourceMetadata: get(
+    "/.well-known/oauth-protected-resource/mcp/:agentId",
+  ),
+  /**
+   * MCP endpoint for one agent (JSON-RPC). Accepts either an IdP-issued OAuth
+   * access token whose `aud` is this URL (the human authorized a client to act
+   * as their bot), or the bot's own `hpa_` token for unattended use.
+   */
+  mcpAgent: post("/mcp/:agentId"),
+  /** Legacy MCP endpoint: `hpa_` token only, acting as that token's agent. */
   mcp: post("/mcp"),
   api: route("api", {
     /** DPoP-protected: returns the current session info. */

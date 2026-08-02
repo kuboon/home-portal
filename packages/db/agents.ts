@@ -96,6 +96,18 @@ export async function getAgentIdByToken(token: string): Promise<string | null> {
 }
 
 /**
+ * The human who owns `agentId`, or `null` if there is no such agent. Used to
+ * check that an OAuth caller (whose `sub` is the human) may act as this agent.
+ */
+export async function getAgentOwner(agentId: string): Promise<string | null> {
+  const { rows } = await (await db()).execute({
+    sql: "SELECT owner_id FROM agents WHERE agent_id = ?",
+    args: [agentId],
+  });
+  return rows[0] ? String(rows[0].owner_id) : null;
+}
+
+/**
  * Revoke an agent (owner only): drop its token and remove it from every home
  * so it can neither authenticate nor linger as a member. The `users` row is
  * kept so its past messages keep their author. Returns whether anything was
