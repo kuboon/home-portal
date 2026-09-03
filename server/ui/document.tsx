@@ -7,27 +7,25 @@
  */
 
 import { Frame, type Handle } from "@remix-run/ui";
+import { NavAuth } from "../../client/nav_auth.tsx";
 import { routes } from "../routes.ts";
 
 type DocumentProps = {
   initialSrc: string;
+  /** IdP origin, for the header's session probe (see NavAuth). */
+  idpOrigin: string;
 };
 
-const THEMES = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "cupcake", label: "Cupcake" },
-  { value: "synthwave", label: "Synthwave" },
-  { value: "retro", label: "Retro" },
-  { value: "dracula", label: "Dracula" },
-  { value: "business", label: "Business" },
-  { value: "nord", label: "Nord" },
-  { value: "lofi", label: "Lo-Fi" },
-] as const;
+/**
+ * The shell (landing / sign-in / home list) is fixed to daisyUI's `cupcake`.
+ * Chat screens are bare documents (`renderBareDocument`) and keep the
+ * default light/dark, so a home's custom CSS builds on a neutral base.
+ */
+const SHELL_THEME = "cupcake";
 
 export function Document(handle: Handle<DocumentProps>) {
   return () => (
-    <html lang="ja">
+    <html lang="ja" data-theme={SHELL_THEME}>
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -49,57 +47,13 @@ export function Document(handle: Handle<DocumentProps>) {
           </div>
           {
             /* Minimal top nav: the product's only global journey is
-              landing → sign in → home list. All settings (members, theme,
-              invites, agents, notifications) live inside each home. */
+              landing → sign in → home list, so the header carries exactly one
+              action — 「サインイン」 while signed out, 「ホーム一覧」 once in.
+              All settings (members, theme, invites, agents, notifications)
+              live inside each home. */
           }
-          <nav class="navbar-end gap-2">
-            <ul class="menu menu-horizontal px-1">
-              <li>
-                <a href={routes.homes.href()} data-rmx-target="content">
-                  ホーム一覧
-                </a>
-              </li>
-              <li>
-                <a href={routes.signin.href()} data-rmx-target="content">
-                  サインイン
-                </a>
-              </li>
-            </ul>
-            <div class="dropdown dropdown-end">
-              <div
-                tabindex={0}
-                role="button"
-                class="btn btn-ghost btn-sm"
-                aria-label="Theme"
-              >
-                Theme
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  class="inline-block opacity-60"
-                >
-                  <path d="M5 7l5 5 5-5H5z" />
-                </svg>
-              </div>
-              <ul
-                tabindex={-1}
-                class="dropdown-content bg-base-300 rounded-box z-10 w-52 p-2 shadow-2xl"
-              >
-                {THEMES.map(({ value, label }) => (
-                  <li>
-                    <input
-                      type="radio"
-                      name="theme-dropdown"
-                      class="theme-controller w-full btn btn-sm btn-block btn-ghost justify-start"
-                      aria-label={label}
-                      value={value}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </div>
+          <nav class="navbar-end">
+            <NavAuth idpOrigin={handle.props.idpOrigin} />
           </nav>
         </header>
         <Frame

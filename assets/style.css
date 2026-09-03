@@ -1,16 +1,12 @@
 @import "tailwindcss/index.css";
 
+/* cupcake: the shell (landing / sign-in / home list) pins it via
+   data-theme; light/dark: chat screens (bare documents) follow the OS. */
 @plugin "daisyui" {
   themes:
     light --default,
     dark --prefersdark,
-    cupcake,
-    synthwave,
-    retro,
-    dracula,
-    business,
-    nord,
-    lofi;
+    cupcake;
 }
 
 @layer base {

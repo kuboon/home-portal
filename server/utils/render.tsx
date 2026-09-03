@@ -20,6 +20,8 @@ import { Document } from "../ui/document.tsx";
 
 export const FRAME_HEADER = "rmx-frame";
 
+const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+
 export const isFrameRequest = (request: Request): boolean =>
   request.headers.get(FRAME_HEADER) === "1";
 
@@ -83,11 +85,14 @@ export function renderShell(context: RequestContext): Response {
     ? routes.welcome.href()
     : url.pathname + url.search;
 
-  const stream = renderToStream(<Document initialSrc={initialSrc} />, {
-    frameSrc: request.url,
-    resolveFrame: (src, target, frameContext) =>
-      resolveFrameViaRouter(router, request, src, target, frameContext),
-  });
+  const stream = renderToStream(
+    <Document initialSrc={initialSrc} idpOrigin={idpOrigin} />,
+    {
+      frameSrc: request.url,
+      resolveFrame: (src, target, frameContext) =>
+        resolveFrameViaRouter(router, request, src, target, frameContext),
+    },
+  );
   return createHtmlResponse(stream);
 }
 
