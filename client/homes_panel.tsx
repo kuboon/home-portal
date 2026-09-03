@@ -40,6 +40,7 @@ export const HomesPanel = clientEntry(
     let homes: HomeWithRole[] = [];
     let newHomeName = "";
     let joinCode = "";
+    let signoutBusy = false;
     let fetchDpop: FetchDpop | null = null;
 
     /** Call a DPoP-protected JSON endpoint; throws on non-2xx with its error. */
@@ -99,6 +100,28 @@ export const HomesPanel = clientEntry(
         });
         joinCode = "";
         await loadHomes();
+      });
+
+    const onSignout = () =>
+      run(async () => {
+        if (signoutBusy) return;
+        signoutBusy = true;
+        handle.update();
+        try {
+          const response = await fetchDpop!(
+            `${handle.props.idpOrigin}/session/logout`,
+            { method: "POST" },
+          );
+          if (!response.ok) {
+            throw new Error(`サインアウトに失敗しました (${response.status})`);
+          }
+        } catch (e) {
+          signoutBusy = false;
+          throw e;
+        }
+        // The persistent shell's header (NavAuth) probed the session at load,
+        // so leave via a full navigation to the landing page to rebuild it.
+        globalThis.location.href = "/";
       });
 
     if (typeof document !== "undefined") {
@@ -233,6 +256,17 @@ export const HomesPanel = clientEntry(
                 </p>
               </div>
             </div>
+          </div>
+
+          <div class="flex justify-end pt-2">
+            <button
+              type="button"
+              class="btn btn-outline btn-sm"
+              disabled={signoutBusy}
+              mix={[on("click", onSignout)]}
+            >
+              サインアウト
+            </button>
           </div>
         </div>
       );

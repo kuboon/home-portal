@@ -8,6 +8,7 @@
 
 const CLIENT_ENTRIES = [
   "mod.ts",
+  "nav_auth.tsx",
   "signin_card.tsx",
   "homes_panel.tsx",
   "chat_panel.tsx",
