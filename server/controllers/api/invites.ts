@@ -6,12 +6,12 @@
  * - accept: any signed-in user redeems a live token to join as a member.
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import { addMember, getHome, getRole, HomeError } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { closeInvite, refreshInvite, resolveInvite } from "../../invites.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -23,7 +23,7 @@ const unauthorized = () =>
 const expired = () =>
   Response.json({ error: "招待が無効か期限切れです" }, { status: 404 });
 
-export const invitesController = {
+export const invitesController = createController(routes.invitesApi, {
   middleware: [dpop],
   actions: {
     async heartbeat(context) {
@@ -78,4 +78,4 @@ export const invitesController = {
       return Response.json({ home: await getHome(homeId) });
     },
   },
-} satisfies Controller<typeof routes.invitesApi>;
+});

@@ -127,7 +127,9 @@ export const HomesPanel = clientEntry(
           <div class="alert alert-soft">
             <span>
               ホームを使うにはサインインが必要です。{" "}
-              <a class="link" href="/signin" rmx-target="content">サインイン</a>
+              <a class="link" href="/signin" data-rmx-target="content">
+                サインイン
+              </a>
             </span>
           </div>
         );

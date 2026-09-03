@@ -5,14 +5,14 @@
  * their MCP bearer token (once). Agents act via the MCP server (see /mcp).
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { AgentsPanel } from "../../client/agents_panel.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 
-export const agentsAction = {
+export const agentsAction = createAction(routes.agents, {
   handler(context) {
     return renderPage(
       context,
@@ -31,4 +31,4 @@ export const agentsAction = {
       </main>,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.agents>;
+});

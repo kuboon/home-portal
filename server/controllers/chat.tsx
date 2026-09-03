@@ -11,10 +11,10 @@
  * per-home `manifest.webmanifest` served by `homeManifestAction`.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { getHome } from "@scope/db";
 import { ChatPanel } from "../../client/chat_panel.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { renderBareDocument } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
@@ -40,25 +40,25 @@ async function chatPage(homeId: string, threadId: string): Promise<Response> {
   );
 }
 
-export const homeChatAction = {
+export const homeChatAction = createAction(routes.homeChat, {
   handler(context) {
     return chatPage(context.params.homeId, "");
   },
-} satisfies BuildAction<"GET", typeof routes.homeChat>;
+});
 
-export const homeThreadAction = {
+export const homeThreadAction = createAction(routes.homeThread, {
   handler(context) {
     const { homeId, threadId } = context.params;
     return chatPage(homeId, threadId);
   },
-} satisfies BuildAction<"GET", typeof routes.homeThread>;
+});
 
 /**
  * GET /home/:homeId/manifest.webmanifest — a per-home PWA manifest so that an
  * "add to home screen" icon (Android/Chrome) is named after the home and opens
  * scoped to `/home/:homeId`. iOS uses the `apple-mobile-web-app-title` meta.
  */
-export const homeManifestAction = {
+export const homeManifestAction = createAction(routes.homeManifest, {
   async handler(context) {
     const { homeId } = context.params;
     const home = await getHome(homeId);
@@ -77,4 +77,4 @@ export const homeManifestAction = {
       headers: { "Content-Type": "application/manifest+json; charset=utf-8" },
     });
   },
-} satisfies BuildAction<"GET", typeof routes.homeManifest>;
+});

@@ -8,14 +8,14 @@
  * navigation — this works for both direct loads and frame swaps.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { SignInCard } from "../../client/signin_card.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 
-export const signinAction = {
+export const signinAction = createAction(routes.signin, {
   handler(context) {
     return renderPage(
       context,
@@ -28,4 +28,4 @@ export const signinAction = {
       </main>,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.signin>;
+});

@@ -5,14 +5,14 @@
  * via the IdP (id.kbn.one) push API. The service worker is served at /sw.js.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { NotificationsCard } from "../../client/notifications_card.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 
-export const notificationsAction = {
+export const notificationsAction = createAction(routes.notifications, {
   handler(context) {
     return renderPage(
       context,
@@ -26,4 +26,4 @@ export const notificationsAction = {
       </main>,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.notifications>;
+});

@@ -6,12 +6,12 @@
  *
  * `run()` walks the document, finds every `clientEntry` marker emitted by
  * `renderToStream`, and hydrates each one. It also wires up the
- * `<Frame name="content">` region so that clicks on `<a rmx-target="content">`
+ * `<Frame name="content">` region so that clicks on `<a data-rmx-target="content">`
  * links swap just the frame content (via `resolveFrame`) instead of doing a
  * full page navigation.
  */
 
-import { run } from "@remix-run/ui";
+import { type ResolveFrameOptions, run } from "@remix-run/ui";
 
 const FRAME_HEADER = "rmx-frame";
 
@@ -20,14 +20,21 @@ const app = run({
     const mod = await import(moduleUrl);
     return mod[exportName];
   },
-  async resolveFrame(src: string, signal?: AbortSignal, target?: string) {
+  resolveFrame(src: string, options?: ResolveFrameOptions) {
     const headers = new Headers({
       accept: "text/html",
       [FRAME_HEADER]: "1",
     });
-    if (target) headers.set("rmx-target", target);
-    const response = await fetch(src, { headers, signal });
-    return response.body ?? (await response.text());
+    if (options?.target) headers.set("rmx-target", options.target);
+    // A form submitted into the frame arrives with its method and body; only
+    // a non-GET submission carries `formData`, and `fetch` rejects a body on
+    // GET, so the body rides along exactly when the method allows it.
+    const method = options?.method ?? "GET";
+    const body = method.toUpperCase() === "GET" ? undefined : options?.formData;
+    // The runtime unwraps a Response itself, and reads `redirected`/`url` off
+    // it to keep the address bar in step with a redirect — something it cannot
+    // recover from a bare body.
+    return fetch(src, { headers, method, body, signal: options?.signal });
   },
 });
 

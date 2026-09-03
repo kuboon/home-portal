@@ -122,7 +122,9 @@ export const AgentsPanel = clientEntry(
           <div class="alert alert-soft">
             <span>
               エージェント管理にはサインインが必要です。{" "}
-              <a class="link" href="/signin" rmx-target="content">サインイン</a>
+              <a class="link" href="/signin" data-rmx-target="content">
+                サインイン
+              </a>
             </span>
           </div>
         );

@@ -17,11 +17,11 @@
  * authorization server.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { getAgentIdByToken, getAgentOwner } from "@scope/db";
 import { handleRpc, type JsonRpcRequest } from "../mcp/server.ts";
 import { AccessTokenError, challenge, verifyAccessToken } from "../oauth_rs.ts";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 
 function bearer(request: Request): string | null {
   const header = request.headers.get("authorization") ?? "";
@@ -62,7 +62,7 @@ async function dispatch(request: Request, agentId: string): Promise<Response> {
   return Response.json(response);
 }
 
-export const mcpAgentAction = {
+export const mcpAgentAction = createAction(routes.mcpAgent, {
   async handler(context) {
     const { agentId } = context.params;
     const token = bearer(context.request);
@@ -99,9 +99,9 @@ export const mcpAgentAction = {
     }
     return await dispatch(context.request, agentId);
   },
-} satisfies BuildAction<"POST", typeof routes.mcpAgent>;
+});
 
-export const mcpAction = {
+export const mcpAction = createAction(routes.mcp, {
   async handler(context) {
     const token = bearer(context.request);
     const agentId = token ? await getAgentIdByToken(token) : null;
@@ -110,4 +110,4 @@ export const mcpAction = {
     }
     return await dispatch(context.request, agentId);
   },
-} satisfies BuildAction<"POST", typeof routes.mcp>;
+});

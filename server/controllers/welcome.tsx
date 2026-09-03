@@ -8,7 +8,7 @@
  * re-entered through the frame resolver to provide the fragment.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import type { RemixNode } from "@remix-run/ui";
 import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
@@ -26,13 +26,13 @@ function feature(icon: string, title: string, body: string): RemixNode {
   );
 }
 
-export const welcomeAction = {
+export const welcomeAction = createAction(routes.welcome, {
   handler(context) {
     const signin = () => (
       <a
         class="btn btn-primary"
         href={routes.signin.href()}
-        rmx-target="content"
+        data-rmx-target="content"
       >
         サインインして始める
       </a>
@@ -104,4 +104,4 @@ export const welcomeAction = {
       </main>,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.welcome>;
+});

@@ -10,7 +10,7 @@
  * agent from a home's settings needs no separate "add by id" step.
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import {
   addMember,
@@ -21,7 +21,7 @@ import {
   listAgentsByOwner,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -31,7 +31,7 @@ function currentUserId(session: DpopSession): string | null {
 const unauthorized = () =>
   Response.json({ error: "not signed in" }, { status: 401 });
 
-export const agentsController = {
+export const agentsController = createController(routes.agentsApi, {
   middleware: [dpop],
   actions: {
     async list(context) {
@@ -81,4 +81,4 @@ export const agentsController = {
       return Response.json({ ok: true });
     },
   },
-} satisfies Controller<typeof routes.agentsApi>;
+});

@@ -12,23 +12,26 @@
  * exists (a probe for a bogus id learns nothing it couldn't guess).
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { IDP_ORIGIN, mcpResourceUri } from "../oauth_rs.ts";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 
-export const mcpResourceMetadataAction = {
-  handler(context) {
-    const { agentId } = context.params;
-    return Response.json({
-      resource: mcpResourceUri(agentId),
-      authorization_servers: [IDP_ORIGIN],
-      scopes_supported: ["mcp"],
-      bearer_methods_supported: ["header"],
-    }, {
-      headers: {
-        "cache-control": "public, max-age=3600",
-        "access-control-allow-origin": "*",
-      },
-    });
+export const mcpResourceMetadataAction = createAction(
+  routes.mcpResourceMetadata,
+  {
+    handler(context) {
+      const { agentId } = context.params;
+      return Response.json({
+        resource: mcpResourceUri(agentId),
+        authorization_servers: [IDP_ORIGIN],
+        scopes_supported: ["mcp"],
+        bearer_methods_supported: ["header"],
+      }, {
+        headers: {
+          "cache-control": "public, max-age=3600",
+          "access-control-allow-origin": "*",
+        },
+      });
+    },
   },
-} satisfies BuildAction<"GET", typeof routes.mcpResourceMetadata>;
+);

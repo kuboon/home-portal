@@ -7,14 +7,14 @@
  * shell+frame on direct access and as a fragment in the content frame.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { HomesPanel } from "../../client/homes_panel.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 
-export const homesAction = {
+export const homesAction = createAction(routes.homes, {
   handler(context) {
     return renderPage(
       context,
@@ -28,4 +28,4 @@ export const homesAction = {
       </main>,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.homes>;
+});

@@ -5,11 +5,11 @@
  * we call `POST /rp/notifications`. Suitable for `jose.createRemoteJWKSet`.
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { getRpKey } from "../rp_key.ts";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 
-export const jwksAction = {
+export const jwksAction = createAction(routes.jwks, {
   async handler() {
     const { publicJwk } = await getRpKey();
     return new Response(JSON.stringify({ keys: [publicJwk] }), {
@@ -20,4 +20,4 @@ export const jwksAction = {
       },
     });
   },
-} satisfies BuildAction<"GET", typeof routes.jwks>;
+});
