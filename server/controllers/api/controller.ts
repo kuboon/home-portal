@@ -12,14 +12,14 @@
  * this request's DPoP thumbprint. The userId is taken from the verified token.
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import { upsertUser } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { IdpTokenError, verifyIdpIdentity } from "../../idp.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
-export const apiController = {
+export const apiController = createController(routes.api, {
   middleware: [dpop],
   actions: {
     me(context) {
@@ -66,4 +66,4 @@ export const apiController = {
       });
     },
   },
-} satisfies Controller<typeof routes.api>;
+});

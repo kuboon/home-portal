@@ -5,7 +5,7 @@
  * The acting user is the `userId` bound to the DPoP session.
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import {
   canUseStamp,
@@ -40,7 +40,7 @@ import {
 } from "../../realtime.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -167,7 +167,7 @@ function sseFromWatch(
   });
 }
 
-export const threadsController = {
+export const threadsController = createController(routes.threadsApi, {
   middleware: [dpop],
   actions: {
     async list(context) {
@@ -574,4 +574,4 @@ export const threadsController = {
       return Response.json({ emojis: await getRecentEmojis(userId) });
     },
   },
-} satisfies Controller<typeof routes.threadsApi>;
+});

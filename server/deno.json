@@ -11,17 +11,17 @@
     "jsxImportSource": "@remix-run/ui"
   },
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1",
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
-    "jose": "jsr:@panva/jose@^6.2.3",
-    "@remix-run/ui": "npm:@remix-run/ui@^0.1.1",
-    "@remix-run/cors-middleware": "npm:@remix-run/cors-middleware@0.1.2",
-    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.18.2",
-    "@remix-run/logger-middleware": "npm:@remix-run/logger-middleware@0.2.1",
-    "@remix-run/html-template": "npm:@remix-run/html-template@0.3.0",
-    "@remix-run/response": "npm:@remix-run/response@0.3.3",
-    "@remix-run/session": "npm:@remix-run/session@^0.4.1",
-    "@remix-run/static-middleware": "npm:@remix-run/static-middleware@0.4.8"
+    "jose": "jsr:@panva/jose@^6.2.10",
+    "@remix-run/ui": "npm:@remix-run/ui@^0.8.0",
+    "@remix-run/cors-middleware": "npm:@remix-run/cors-middleware@0.1.8",
+    "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.21.0",
+    "@remix-run/logger-middleware": "npm:@remix-run/logger-middleware@0.3.5",
+    "@remix-run/html-template": "npm:@remix-run/html-template@0.3.1",
+    "@remix-run/response": "npm:@remix-run/response@0.3.8",
+    "@remix-run/session": "npm:@remix-run/session@^0.4.2",
+    "@remix-run/static-middleware": "npm:@remix-run/static-middleware@0.4.14"
   },
   "permissions": {
     "default": {

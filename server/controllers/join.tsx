@@ -9,16 +9,16 @@
  * (the token grants that home already, so this leaks nothing new).
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
+import { createAction } from "@remix-run/fetch-router";
 import { getHome } from "@scope/db";
 import { JoinPanel } from "../../client/join_panel.tsx";
-import type { routes } from "../routes.ts";
+import { routes } from "../routes.ts";
 import { resolveInvite } from "../invites.ts";
 import { renderBareDocument } from "../utils/render.tsx";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 
-export const joinAction = {
+export const joinAction = createAction(routes.join, {
   async handler(context) {
     const { token } = context.params;
     const homeId = await resolveInvite(token);
@@ -34,4 +34,4 @@ export const joinAction = {
       />,
     );
   },
-} satisfies BuildAction<"GET", typeof routes.join>;
+});

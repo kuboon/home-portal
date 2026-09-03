@@ -9,7 +9,7 @@
  * ephemeral invite token (`invite` issues one; see `invites.ts`).
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import {
   addMember,
@@ -27,7 +27,7 @@ import {
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
 import { createInvite, INVITE_TTL_MS } from "../../invites.ts";
 import { sanitizeThemeCss } from "../../theme.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -63,7 +63,7 @@ function parseRole(value: unknown): Role | null {
   return value === "admin" || value === "member" ? value : null;
 }
 
-export const homesController = {
+export const homesController = createController(routes.homesApi, {
   middleware: [dpop],
   actions: {
     async list(context) {
@@ -194,4 +194,4 @@ export const homesController = {
       return Response.json({ ok: true, themeCss: css });
     },
   },
-} satisfies Controller<typeof routes.homesApi>;
+});

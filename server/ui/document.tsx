@@ -2,7 +2,7 @@
  * Document — the persistent HTML shell (nav + `<Frame name="content">`).
  *
  * Client-side, `run()` (bundled from client/mod.ts) turns clicks on
- * `<a rmx-target="content">` into frame reloads instead of full document
+ * `<a data-rmx-target="content">` into frame reloads instead of full document
  * navigations.
  */
 
@@ -42,7 +42,7 @@ export function Document(handle: Handle<DocumentProps>) {
             <a
               class="btn btn-ghost text-xl"
               href={routes.home.href()}
-              rmx-target="content"
+              data-rmx-target="content"
             >
               ホムポタ
             </a>
@@ -55,12 +55,12 @@ export function Document(handle: Handle<DocumentProps>) {
           <nav class="navbar-end gap-2">
             <ul class="menu menu-horizontal px-1">
               <li>
-                <a href={routes.homes.href()} rmx-target="content">
+                <a href={routes.homes.href()} data-rmx-target="content">
                   ホーム一覧
                 </a>
               </li>
               <li>
-                <a href={routes.signin.href()} rmx-target="content">
+                <a href={routes.signin.href()} data-rmx-target="content">
                   サインイン
                 </a>
               </li>

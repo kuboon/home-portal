@@ -7,7 +7,7 @@
  * regular message endpoints (`{ stampId }` in the post body).
  */
 
-import type { Controller } from "@remix-run/fetch-router";
+import { createController } from "@remix-run/fetch-router";
 
 import {
   createStamp,
@@ -18,7 +18,7 @@ import {
   removeFromLibrary,
 } from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
-import type { routes } from "../../routes.ts";
+import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -28,7 +28,7 @@ function currentUserId(session: DpopSession): string | null {
 const unauthorized = () =>
   Response.json({ error: "not signed in" }, { status: 401 });
 
-export const stampsController = {
+export const stampsController = createController(routes.stampsApi, {
   middleware: [dpop],
   actions: {
     async list(context) {
@@ -85,4 +85,4 @@ export const stampsController = {
       return Response.json({ stamps: await listHomeStamps(homeId, userId) });
     },
   },
-} satisfies Controller<typeof routes.stampsApi>;
+});

@@ -192,7 +192,9 @@ export const NotificationsCard = clientEntry(
           <div class="alert alert-soft">
             <span>
               通知設定にはサインインが必要です。{" "}
-              <a class="link" href="/signin" rmx-target="content">サインイン</a>
+              <a class="link" href="/signin" data-rmx-target="content">
+                サインイン
+              </a>
             </span>
           </div>
         );

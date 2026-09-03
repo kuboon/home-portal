@@ -142,9 +142,8 @@ export interface DpopSessionMiddlewareOptions {
   onError?: (error: string, request: Request) => Response | Promise<Response>;
 }
 
-type SetDpopSessionContextTransform = readonly [
-  readonly [typeof DpopSession, DpopSession],
-];
+/** The context effect: this middleware provides {@link DpopSession}. */
+type SetDpopSession = { key: typeof DpopSession; value: DpopSession };
 
 /**
  * Middleware that verifies the DPoP proof on every request and exposes a
@@ -159,8 +158,7 @@ type SetDpopSessionContextTransform = readonly [
  */
 export function dpopSession(
   options: DpopSessionMiddlewareOptions,
-  // deno-lint-ignore no-explicit-any
-): Middleware<any, any, SetDpopSessionContextTransform> {
+): Middleware<SetDpopSession> {
   const { sessionStorage } = options;
   const maxAgeSeconds = options.maxAgeSeconds ?? 300;
   const clockSkewSeconds = options.clockSkewSeconds ?? 60;

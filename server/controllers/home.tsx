@@ -3,12 +3,12 @@
  * The frame starts on /welcome (the landing fragment).
  */
 
-import type { BuildAction } from "@remix-run/fetch-router";
-import type { routes } from "../routes.ts";
+import { createAction } from "@remix-run/fetch-router";
+import { routes } from "../routes.ts";
 import { renderShell } from "../utils/render.tsx";
 
-export const homeAction = {
+export const homeAction = createAction(routes.home, {
   handler(context) {
     return renderShell(context);
   },
-} satisfies BuildAction<"GET", typeof routes.home>;
+});
