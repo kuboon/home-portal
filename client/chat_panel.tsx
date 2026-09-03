@@ -2398,9 +2398,7 @@ export const ChatPanel = clientEntry(
                 ☰
               </label>
               <h2 class="font-bold truncate flex-1">
-                <span class="opacity-40 font-normal mr-1">
-                  {currentThreadId ? "🧵" : "#"}
-                </span>
+                <span class="opacity-40 font-normal mr-1">#</span>
                 {channelName()}
               </h2>
               {currentThreadId &&
