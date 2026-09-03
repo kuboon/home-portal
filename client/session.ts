@@ -30,10 +30,10 @@ export interface Session {
   accessToken: string | null;
   /**
    * The signed-in user's display name: the IdP's `nickname` when they've set
-   * one, else our `users` row's display name (which the IdP identity seeds, so
-   * it ends up being the userId). `null` when signed out. Callers use it to
-   * prefill a display-name field rather than making the user type from
-   * scratch.
+   * one, else our `users` row's display name. `null` when signed out, and also
+   * when the only name on file is the bare userId — callers use this to
+   * prefill a display-name field, and a userId is not a name anyone would
+   * keep, so an empty field beats a wrong default.
    */
   displayName: string | null;
 }
@@ -78,13 +78,17 @@ export async function ensureSession(idpOrigin: string): Promise<Session> {
       // of falling back to the bare userId.
       body: JSON.stringify(displayName ? { jws, displayName } : { jws }),
     }).catch(() => null);
-    // No nickname at the IdP → fall back to the `users` row's display name
-    // (seeded from the IdP identity) so callers still get a sane default.
+    // No nickname at the IdP → fall back to the `users` row's display name.
+    // That row is seeded with the bare userId when nothing better is known,
+    // and a userId is not a name a person would choose: offering it as the
+    // default just makes them clear the field first, so report "no name" and
+    // let callers show an empty field instead.
     if (!displayName && synced?.ok) {
       const data = await synced.json().catch(() => null) as
         | { user?: { displayName?: string } }
         | null;
-      displayName = data?.user?.displayName ?? null;
+      const stored = data?.user?.displayName?.trim();
+      displayName = stored && stored !== userId ? stored : null;
     }
   }
 

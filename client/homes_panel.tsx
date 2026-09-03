@@ -34,6 +34,8 @@ export const HomesPanel = clientEntry(
   function HomesPanel(handle: Handle<HomesPanelProps>) {
     let ready = false;
     let userId: string | null = null;
+    /** The IdP nickname (or our users row's name) — the display-name default. */
+    let displayName: string | null = null;
     let error = "";
     let homes: HomeWithRole[] = [];
     let newHomeName = "";
@@ -73,12 +75,12 @@ export const HomesPanel = clientEntry(
       run(async () => {
         const name = newHomeName.trim();
         if (!name) return;
-        const displayName =
-          globalThis.prompt(`「${name}」での表示名`, userId ?? "") ?? "";
+        const chosen =
+          globalThis.prompt(`「${name}」での表示名`, displayName ?? "") ?? "";
         await api("/api/homes", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, displayName }),
+          body: JSON.stringify({ name, displayName: chosen }),
         });
         newHomeName = "";
         await loadHomes();
@@ -88,12 +90,12 @@ export const HomesPanel = clientEntry(
       run(async () => {
         const code = joinCode.trim();
         if (!code) return;
-        const displayName =
-          globalThis.prompt("このホームでの表示名", userId ?? "") ?? "";
+        const chosen =
+          globalThis.prompt("このホームでの表示名", displayName ?? "") ?? "";
         await api(`/api/invites/${code}/accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName }),
+          body: JSON.stringify({ displayName: chosen }),
         });
         joinCode = "";
         await loadHomes();
@@ -105,6 +107,7 @@ export const HomesPanel = clientEntry(
           const session = await ensureSession(handle.props.idpOrigin);
           fetchDpop = session.fetchDpop;
           userId = session.userId;
+          displayName = session.displayName;
           if (userId) await loadHomes();
         } catch (e) {
           error = (e as Error).message;
