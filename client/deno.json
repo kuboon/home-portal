@@ -9,6 +9,6 @@
     "@kuboon/dpop": "jsr:@kuboon/dpop@^0.2.0",
     "@remix-run/ui": "npm:@remix-run/ui@^0.8.0",
     "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.21.0",
-    "qrcode-generator": "npm:qrcode-generator@^1.4.4"
+    "qrcode-generator": "npm:qrcode-generator@^2.0.4"
   }
 }

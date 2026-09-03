@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "exports": "./mod.ts",
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1",
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0",
     "@remix-run/session": "npm:@remix-run/session@^0.4.2",
     "@std/assert": "jsr:@std/assert@^1.0.19"
   },

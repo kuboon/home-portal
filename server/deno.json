@@ -11,9 +11,9 @@
     "jsxImportSource": "@remix-run/ui"
   },
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1",
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
-    "jose": "jsr:@panva/jose@^6.2.3",
+    "jose": "jsr:@panva/jose@^6.2.10",
     "@remix-run/ui": "npm:@remix-run/ui@^0.8.0",
     "@remix-run/cors-middleware": "npm:@remix-run/cors-middleware@0.1.8",
     "@remix-run/fetch-router": "npm:@remix-run/fetch-router@0.21.0",

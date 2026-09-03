@@ -25,6 +25,6 @@
   "nodeModulesDir": "auto",
   "unstable": ["bundle", "kv"],
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.1.1"
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0"
   }
 }
