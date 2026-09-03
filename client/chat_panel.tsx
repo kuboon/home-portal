@@ -262,6 +262,11 @@ export const ChatPanel = clientEntry(
     let imageUploading = false;
     let paletteFor: string | null = null;
     let quotesFor: string | null = null;
+    /**
+     * 「スレッドで返信」の API 完了待ち。押した瞬間にサイドバーの「参加中」を
+     * ハイライト（スマホでは drawer も開く）して反応を見せる。
+     */
+    let pickupPending = false;
     // 長押しで開くコンテキストメニュー（ボトムシート）。
     let menuFor: string | null = null;
     let menuOpenedAt = 0;
@@ -331,6 +336,15 @@ export const ChatPanel = clientEntry(
       if (typeof document === "undefined") return;
       const cb = document.getElementById(DRAWER_ID) as HTMLInputElement | null;
       if (cb) cb.checked = false;
+    };
+
+    /** モバイル（drawer がオーバーレイのとき）だけ drawer を開く。 */
+    const openDrawerOnMobile = () => {
+      if (typeof document === "undefined") return;
+      // lg 以上は CSS で常時表示（lg:drawer-open）なので触らない。
+      if (globalThis.matchMedia?.("(min-width: 1024px)").matches) return;
+      const cb = document.getElementById(DRAWER_ID) as HTMLInputElement | null;
+      if (cb) cb.checked = true;
     };
 
     const openMenu = (id: string) => {
@@ -680,22 +694,38 @@ export const ChatPanel = clientEntry(
 
     const onPickupToNewThread = (messageId: string) =>
       run(async () => {
-        // Title is auto-derived from the first 10 chars of the replied-to post
-        // (editable later), so the reply flow needs no prompt.
-        const src = messages.find((x) => x.id === messageId);
-        const base = (src?.body ?? src?.repost?.body ?? "")
-          .replace(/\s+/g, " ").trim();
-        const title = base.slice(0, 10) || "スレッド";
-        const data = await api(`/api/homes/${homeId}/threads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title,
-            sourcePostIds: [messageId],
-          }),
-        }) as { thread: Thread };
-        await loadThreads();
-        await selectChannel(data.thread.id);
+        if (pickupPending) return;
+        // 押した反応をすぐ見せる: 「参加中」をハイライトし、スマホなら
+        // サイドメニューを開いてそこに新スレッドが増えることを予告する。
+        pickupPending = true;
+        paletteFor = null;
+        openDrawerOnMobile();
+        handle.update();
+        let created = false;
+        try {
+          // Title is auto-derived from the first 10 chars of the replied-to
+          // post (editable later), so the reply flow needs no prompt.
+          const src = messages.find((x) => x.id === messageId);
+          const base = (src?.body ?? src?.repost?.body ?? "")
+            .replace(/\s+/g, " ").trim();
+          const title = base.slice(0, 10) || "スレッド";
+          const data = await api(`/api/homes/${homeId}/threads`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title,
+              sourcePostIds: [messageId],
+            }),
+          }) as { thread: Thread };
+          await loadThreads();
+          created = true;
+          // 以降は従来どおり: 新スレッドへ移動（drawer はここで閉じる）。
+          await selectChannel(data.thread.id);
+        } finally {
+          pickupPending = false;
+          // 失敗時は開いた drawer を戻してエラー表示を見えるようにする。
+          if (!created) closeDrawer();
+        }
       });
 
     const onRenameThread = (threadId: string, current: string) =>
@@ -1421,11 +1451,11 @@ export const ChatPanel = clientEntry(
           {m.deleted || pending
             ? null
             : (
-              <div class="absolute -top-3 right-4 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex rounded-lg border border-base-300 bg-base-100 shadow-md overflow-hidden">
+              <div class="absolute -top-4 right-4 z-10 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex rounded-lg border border-base-300 bg-base-100 shadow-md overflow-hidden">
                 {archived() ? null : (
                   <button
                     type="button"
-                    class="btn btn-ghost btn-xs rounded-none"
+                    class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
                     aria-label="リアクション"
                     title="リアクション"
                     mix={[on("click", () => {
@@ -1438,7 +1468,7 @@ export const ChatPanel = clientEntry(
                 )}
                 <button
                   type="button"
-                  class="btn btn-ghost btn-xs rounded-none"
+                  class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
                   aria-label="スレッドで返信"
                   title="スレッドで返信"
                   mix={[on("click", () => onPickupToNewThread(m.id))]}
@@ -1449,7 +1479,7 @@ export const ChatPanel = clientEntry(
                   ? (
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs rounded-none"
+                      class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
                       aria-label="編集"
                       title="編集"
                       mix={[on("click", () => onEdit(m.id, m.body))]}
@@ -1462,7 +1492,7 @@ export const ChatPanel = clientEntry(
                   ? (
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs rounded-none"
+                      class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
                       aria-label="削除"
                       title="削除"
                       mix={[on("click", () => onDelete(m.id))]}
@@ -1714,15 +1744,36 @@ export const ChatPanel = clientEntry(
       );
     };
 
-    const threadGroup = (label: string, list: Thread[], icon = "#") =>
-      list.length === 0 ? [] : [
+    const threadGroup = (
+      label: string,
+      list: Thread[],
+      icon = "#",
+      /** true の間はグループを強調し、末尾に「作成中…」の行を出す。 */
+      pending = false,
+    ) =>
+      list.length === 0 && !pending ? [] : [
         <div
           key={`title-${label}`}
-          class="px-2 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider opacity-50"
+          class={`px-2 pt-4 pb-1 text-[11px] font-semibold uppercase tracking-wider ${
+            pending ? "text-primary animate-pulse" : "opacity-50"
+          }`}
         >
           {label}
         </div>,
         ...list.map((t) => channelItem(t.id, t.title, icon)),
+        ...(pending
+          ? [
+            <div
+              key={`pending-${label}`}
+              class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm bg-primary/10 text-primary"
+              aria-live="polite"
+            >
+              <span class="loading loading-spinner loading-xs shrink-0 w-4">
+              </span>
+              <span class="truncate flex-1">スレッドを作成中…</span>
+            </div>,
+          ]
+          : []),
       ];
 
     const sidebar = () => (
@@ -1743,6 +1794,8 @@ export const ChatPanel = clientEntry(
           {threadGroup(
             "参加中",
             threads.filter((t) => !t.archivedAt && t.joined),
+            "#",
+            pickupPending,
           )}
           {threadGroup(
             "未参加",
@@ -1821,14 +1874,10 @@ export const ChatPanel = clientEntry(
                 <a class="btn btn-sm btn-outline" href="/notifications">
                   🔔 通知・ホーム画面に追加
                 </a>
-                <a class="btn btn-sm btn-outline" href="/agents">
-                  🤖 エージェント管理
-                </a>
               </div>
               <p class="text-xs opacity-50 mt-1">
-                通知の受信登録とこのアプリのホーム画面追加、エージェントの
-                トークン再発行・失効はこちら。エージェントの作成は「ホームの
-                設定」から行うと、このホームへの追加まで済みます。
+                通知の受信登録とこのアプリのホーム画面追加はこちら。
+                エージェントの作成・管理は「ホームの設定」から。
               </p>
             </div>
           </div>
