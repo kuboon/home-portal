@@ -514,6 +514,7 @@
         "dependencies": [
           "jsr:@kuboon/browser-how-to@0.1",
           "jsr:@kuboon/dpop@0.2",
+          "jsr:@std/assert@^1.0.19",
           "npm:@remix-run/fetch-router@0.21.0",
           "npm:@remix-run/ui@0.8",
           "npm:qrcode-generator@^2.0.4"

@@ -21,6 +21,7 @@ import {
 import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
+import { splitLinks } from "./linkify.ts";
 import {
   storageImageUrl,
   type StorageSession,
@@ -1176,6 +1177,27 @@ export const ChatPanel = clientEntry(
       })();
     }
 
+    /**
+     * 本文の URL をリンクにして描画。テキスト部分はそのまま文字列で出す
+     * ので、本文中の `<` などが HTML として解釈されることはない。
+     */
+    const renderBody = (text: string) =>
+      splitLinks(text).map((seg, i) =>
+        seg.type === "link"
+          ? (
+            <a
+              key={i}
+              href={seg.value}
+              class="link link-primary break-all"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {seg.value}
+            </a>
+          )
+          : seg.value
+      );
+
     /** アバター（authorId から決定的な色 + 頭文字）。 */
     const avatar = (m: Message) => (
       <div
@@ -1316,7 +1338,11 @@ export const ChatPanel = clientEntry(
                           )
                           : null}
                         {m.repost.body
-                          ? <span class="align-middle">{m.repost.body}</span>
+                          ? (
+                            <span class="align-middle">
+                              {renderBody(m.repost.body)}
+                            </span>
+                          )
                           : null}
                       </span>
                     )}
@@ -1344,7 +1370,7 @@ export const ChatPanel = clientEntry(
                     m.hidden ? "opacity-60" : ""
                   }`}
                 >
-                  {m.body}
+                  {renderBody(m.body)}
                   {m.editedAt
                     ? <span class="text-xs opacity-50 ml-1">(編集済み)</span>
                     : null}
