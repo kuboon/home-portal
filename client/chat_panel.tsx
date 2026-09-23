@@ -21,6 +21,7 @@ import {
 import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
+import { installDrawerSwipe } from "./drawer_swipe.ts";
 import { splitLinks } from "./linkify.ts";
 import {
   storageImageUrl,
@@ -1110,26 +1111,15 @@ export const ChatPanel = clientEntry(
     };
 
     if (typeof document !== "undefined") {
-      // Right-swipe from the left edge opens the drawer; left-swipe closes it.
-      // (No-op on desktop where the drawer is always open via CSS.)
-      let sx = 0;
-      let sy = 0;
-      document.addEventListener("touchstart", (e) => {
-        sx = e.touches[0].clientX;
-        sy = e.touches[0].clientY;
-      }, { passive: true });
-      document.addEventListener("touchend", (e) => {
-        const t = e.changedTouches[0];
-        const dx = t.clientX - sx;
-        const dy = t.clientY - sy;
-        if (Math.abs(dy) > 50) return;
-        const cb = document.getElementById(DRAWER_ID) as
-          | HTMLInputElement
-          | null;
-        if (!cb) return;
-        if (sx < 40 && dx > 60) cb.checked = true;
-        else if (cb.checked && dx < -60) cb.checked = false;
-      }, { passive: true });
+      // スレッドメニューが畳まれているとき、チャット領域のどこを右スワイプ
+      // しても左から引き出す（以前は左端 40px 起点だけだった）。開いている
+      // ときは左スワイプで閉じる。デスクトップは lg:drawer-open で常時表示
+      // なので openDrawerOnMobile が空振りして何も起きない。
+      installDrawerSwipe({
+        drawerId: DRAWER_ID,
+        open: openDrawerOnMobile,
+        close: closeDrawer,
+      });
 
       // Keep the view in sync with browser back/forward.
       globalThis.addEventListener("popstate", () => {
