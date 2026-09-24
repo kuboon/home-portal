@@ -9,6 +9,7 @@
 import { Frame, type Handle } from "@remix-run/ui";
 import { NavAuth } from "../../client/nav_auth.tsx";
 import { routes } from "../routes.ts";
+import { BASE_100_CUPCAKE } from "./theme_colors.ts";
 
 type DocumentProps = {
   initialSrc: string;
@@ -30,6 +31,8 @@ export function Document(handle: Handle<DocumentProps>) {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>home portal (ホムポタ)</title>
+        {/* シェルは cupcake 固定なので、OS のスキームによらず 1 色でよい。 */}
+        <meta name="theme-color" content={BASE_100_CUPCAKE} />
         <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />
         <script async type="module" src="/mod.js"></script>
         <link rel="stylesheet" href="/style.css" />

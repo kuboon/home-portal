@@ -17,6 +17,7 @@ import { createHtmlResponse } from "@remix-run/response/html";
 
 import { routes } from "../routes.ts";
 import { Document } from "../ui/document.tsx";
+import { BASE_100_DARK, BASE_100_LIGHT } from "../ui/theme_colors.ts";
 
 export const FRAME_HEADER = "rmx-frame";
 
@@ -64,7 +65,26 @@ export function renderBareDocument(
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>{title}</title>
+        {
+          /* ステータスバーに塗る色の宣言。これが無いと iOS 26 以降の
+            standalone でシステムがすりガラスを敷き、ヘッダーがぼける。
+            media 付きを先に並べ、media 無しは最後（常に一致するため）。
+            チャット画面は data-theme を持たず OS の light/dark に従う。 */
+        }
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: light)"
+          content={BASE_100_LIGHT}
+        />
+        <meta
+          name="theme-color"
+          media="(prefers-color-scheme: dark)"
+          content={BASE_100_DARK}
+        />
+        <meta name="theme-color" content={BASE_100_LIGHT} />
         <meta name="apple-mobile-web-app-capable" content="yes" />
+        {/* 明示的に不透明。black-translucent はすりガラスを呼び込む。 */}
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-title" content={title} />
         <link rel="icon" href="data:image/png;base64,iVBORw0KGgo=" />

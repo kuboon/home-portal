@@ -16,6 +16,7 @@ import { getHome } from "@scope/db";
 import { ChatPanel } from "../../client/chat_panel.tsx";
 import { routes } from "../routes.ts";
 import { renderBareDocument } from "../utils/render.tsx";
+import { BASE_100_LIGHT } from "../ui/theme_colors.ts";
 
 const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
 const storageOrigin = Deno.env.get("STORAGE_ORIGIN") ??
@@ -70,8 +71,12 @@ export const homeManifestAction = createAction(routes.homeManifest, {
       start_url: start,
       scope: start,
       display: "standalone",
-      background_color: "#ffffff",
-      theme_color: "#ffffff",
+      // manifest は media クエリを持てないので、既定のカラースキーム
+      // （daisyUI の `light --default`）の色を入れる。OS が dark の端末では
+      // スプラッシュだけ明るくなるが、ステータスバーは上の `theme-color`
+      // が media 付きで正しく出し分ける。
+      background_color: BASE_100_LIGHT,
+      theme_color: BASE_100_LIGHT,
     };
     return new Response(JSON.stringify(manifest), {
       headers: { "Content-Type": "application/manifest+json; charset=utf-8" },
