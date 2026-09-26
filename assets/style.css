@@ -42,6 +42,84 @@
   }
 }
 
+/* チャット画面の 2 ペイン（pull to reveal）。
+   モバイルでは横スクロールのスナップ容器にして、本文を右へ引くと左から
+   スレッド一覧が現れる。指に追従し、途中で止められ、離すとスナップする
+   のは全てブラウザの仕事で、JS のジェスチャ判定は要らない。入力欄や横
+   スクロールできる要素の中では入れ子のスクロールが優先されるので、そこ
+   での誤爆も自動的に防がれる。
+
+   direction: rtl はスクロール原点を右端へ移すためだけのもの。これにより
+   DOM 順を [本文, サイドバー] にすると、初期位置が本文になり、左側の
+   サイドバーは画面外に置かれる。同じことを scroll-initial-target でも
+   書けるが、あちらは Safari が未対応で iOS では初期位置が定まらない。
+   子には direction: ltr を戻すので、文字組みには影響しない。 */
+.chat-shell {
+  height: 100dvh;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  direction: rtl;
+  /* 端での余韻が iOS の戻るジェスチャへ抜けないようにする。 */
+  overscroll-behavior-x: contain;
+}
+
+/* オーバーレイ類も含めて文字組みは ltr に戻す。 */
+.chat-shell > * {
+  direction: ltr;
+}
+
+/* スナップ対象は 2 つのペインだけ（fixed なオーバーレイは対象外）。 */
+.chat-pane-content,
+.chat-pane-side {
+  flex: none;
+  scroll-snap-align: start;
+}
+
+.chat-pane-content {
+  width: 100vw;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-pane-side {
+  width: 18rem;
+}
+
+/* 入力欄の中の横ドラッグはキャレット操作。ペインの切り替えに使わせない。
+   既定の touch-action: manipulation はパンをブラウザに任せてしまうため、
+   縦だけ許可して横は要素に残す。 */
+.chat-pane-content :is(input, textarea) {
+  touch-action: pan-y;
+}
+
+/* 横スクロールする塊（コードブロック等）は、端に達しても外へ繋げない。
+   繋がると、コードを端まで送った勢いでペインが切り替わってしまう。 */
+.chat-pane-content pre {
+  overscroll-behavior-x: contain;
+}
+
+/* lg 以上は常時 2 カラム。スクロールとスナップを切り、順序を戻す。 */
+@media (min-width: 1024px) {
+  .chat-shell {
+    overflow-x: hidden;
+    scroll-snap-type: none;
+    direction: ltr;
+  }
+
+  .chat-pane-content {
+    width: auto;
+    flex: 1 1 0%;
+    order: 2;
+  }
+
+  .chat-pane-side {
+    order: 1;
+  }
+}
+
 /* 長押しで開くコンテキストメニューを下からせり上がらせる。 */
 @keyframes sheet-up {
   from {
