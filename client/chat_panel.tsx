@@ -3,9 +3,11 @@
  * `/home/:homeId/thread/:threadId`).
  *
  * Layout: a left sidebar listing the main channel + every thread, and a right
- * conversation pane. On desktop the sidebar is always shown (daisyUI
- * `lg:drawer-open`); on mobile it is an overlay drawer opened by the hamburger
- * button or a right-swipe from the screen edge.
+ * conversation pane. On desktop both are always shown side by side. On mobile
+ * they are the two snap points of one horizontal scroller (`.chat-shell` in
+ * assets/style.css): the conversation is the initial position, and pulling it
+ * to the right reveals the sidebar. The drag is native scrolling, so it
+ * follows the finger and can be interrupted.
  *
  * The "main channel" is the home's thread-less conversation; selecting it or a
  * thread swaps the conversation client-side and updates the URL (pushState)
@@ -21,7 +23,6 @@ import {
 import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
-import { installDrawerSwipe } from "./drawer_swipe.ts";
 import { splitLinks } from "./linkify.ts";
 import {
   storageImageUrl,
@@ -172,7 +173,9 @@ interface Message {
 const DEFAULT_EMOJIS = ["👍", "❤️", "😂", "🎉", "😮", "🙏"];
 /** ライブラリ上限（サーバ側 MAX_LIBRARY_STAMPS と揃える）。 */
 const MAX_LIBRARY_STAMPS = 20;
-const DRAWER_ID = "chat-drawer";
+/** 横スクロールで切り替える 2 つのペイン。 */
+const CONTENT_ID = "chat-content";
+const SIDE_ID = "chat-side";
 const COMPOSER_INPUT_ID = "chat-composer-input";
 
 /** 同一著者の連投をひとまとめに表示する時間幅（Slack/Discord 風）。 */
@@ -334,20 +337,24 @@ export const ChatPanel = clientEntry(
       el.textContent = css;
     };
 
-    const closeDrawer = () => {
+    /**
+     * ペインを横スクロールで見せる。lg 以上では容器が overflow-x: hidden
+     * になるのでスクロールできず、呼んでも何も起きない。
+     */
+    const showPane = (id: string) => {
       if (typeof document === "undefined") return;
-      const cb = document.getElementById(DRAWER_ID) as HTMLInputElement | null;
-      if (cb) cb.checked = false;
+      document.getElementById(id)?.scrollIntoView({
+        inline: "start",
+        block: "nearest", // 縦位置は動かさない
+        behavior: "smooth",
+      });
     };
 
-    /** モバイル（drawer がオーバーレイのとき）だけ drawer を開く。 */
-    const openDrawerOnMobile = () => {
-      if (typeof document === "undefined") return;
-      // lg 以上は CSS で常時表示（lg:drawer-open）なので触らない。
-      if (globalThis.matchMedia?.("(min-width: 1024px)").matches) return;
-      const cb = document.getElementById(DRAWER_ID) as HTMLInputElement | null;
-      if (cb) cb.checked = true;
-    };
+    /** 本文へ戻す（サイドバーを隠す）。 */
+    const closeDrawer = () => showPane(CONTENT_ID);
+
+    /** サイドバーを見せる。デスクトップでは常時表示なので空振りする。 */
+    const openDrawerOnMobile = () => showPane(SIDE_ID);
 
     const openMenu = (id: string) => {
       menuFor = id;
@@ -1111,16 +1118,6 @@ export const ChatPanel = clientEntry(
     };
 
     if (typeof document !== "undefined") {
-      // スレッドメニューが畳まれているとき、チャット領域のどこを右スワイプ
-      // しても左から引き出す（以前は左端 40px 起点だけだった）。開いている
-      // ときは左スワイプで閉じる。デスクトップは lg:drawer-open で常時表示
-      // なので openDrawerOnMobile が空振りして何も起きない。
-      installDrawerSwipe({
-        drawerId: DRAWER_ID,
-        open: openDrawerOnMobile,
-        close: closeDrawer,
-      });
-
       // Keep the view in sync with browser back/forward.
       globalThis.addEventListener("popstate", () => {
         const m = location.pathname.match(/\/home\/[^/]+\/thread\/([^/]+)/);
@@ -1793,7 +1790,10 @@ export const ChatPanel = clientEntry(
       ];
 
     const sidebar = () => (
-      <aside class="chat-sidebar bg-base-300 w-72 h-full min-h-full flex flex-col">
+      <aside
+        id={SIDE_ID}
+        class="chat-pane-side chat-sidebar bg-base-300 h-full flex flex-col"
+      >
         <div class="h-12 px-4 flex items-center justify-between gap-2 border-b border-base-content/10 shrink-0">
           <span class="font-bold truncate">{homeName || "ホーム"}</span>
           <a
@@ -2394,25 +2394,25 @@ export const ChatPanel = clientEntry(
         );
       }
       return (
-        <div class="drawer lg:drawer-open h-[100dvh]">
+        <div class="chat-shell">
           {settingsOpen ? settingsOverlay() : null}
           {menuFor ? contextSheet() : null}
-          <input id={DRAWER_ID} type="checkbox" class="drawer-toggle" />
           {
-            /* daisyUI の drawer は grid のため、h-full だと grid トラックが
-              中身の高さまで伸びて composer が画面外へ押し出される。ビュー
-              ポート高で固定し、メッセージ一覧を内部スクロールに閉じ込める
-              ことで composer を下端に貼り付ける。 */
+            /* DOM 順は [本文, サイドバー]。容器の direction: rtl でスクロール
+              原点が右端になるため、初期位置は本文になり、サイドバーは画面外
+              の左側に置かれる。高さは容器が 100dvh で固定し、メッセージ一覧
+              を内部スクロールに閉じ込めることで composer を下端に貼り付ける。 */
           }
-          <div class="drawer-content flex flex-col min-w-0 h-[100dvh]">
+          <main class="chat-pane-content" id={CONTENT_ID}>
             <header class="h-12 flex items-center gap-2 px-3 border-b border-base-300 shadow-sm shrink-0">
-              <label
-                for={DRAWER_ID}
-                class="btn btn-ghost btn-sm btn-square drawer-button lg:hidden"
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm btn-square lg:hidden"
                 aria-label="スレッド一覧"
+                mix={[on("click", openDrawerOnMobile)]}
               >
                 ☰
-              </label>
+              </button>
               <h2 class="font-bold truncate flex-1">
                 <span class="opacity-40 font-normal mr-1">#</span>
                 {channelName()}
@@ -2686,13 +2686,9 @@ export const ChatPanel = clientEntry(
                   </div>
                 </div>
               )}
-          </div>
+          </main>
 
-          <div class="drawer-side z-10">
-            <label for={DRAWER_ID} class="drawer-overlay" aria-label="閉じる">
-            </label>
-            {sidebar()}
-          </div>
+          {sidebar()}
         </div>
       );
     };
