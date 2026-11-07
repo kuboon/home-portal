@@ -640,7 +640,11 @@ export const ChatPanel = clientEntry(
         }
       });
 
-    /** Open the active channel's SSE stream; re-fetch messages on each ping. */
+    /**
+     * Open the active channel's SSE stream; re-fetch messages on each ping.
+     * The server ends the stream when its realtime hub restarts (e.g. on a
+     * deploy), so reconnect with backoff and re-sync whatever was missed.
+     */
     const startStream = (threadId: string | null) => {
       streamAbort?.abort();
       const ac = new AbortController();
@@ -648,13 +652,20 @@ export const ChatPanel = clientEntry(
       const src = threadId
         ? `/api/threads/${threadId}/stream`
         : `/api/homes/${homeId}/stream`;
-      (async () => {
+      const isCurrent = () =>
+        !ac.signal.aborted && currentThreadId === threadId;
+      const sync = async () => {
+        await loadMessages();
+        handle.update();
+      };
+      const listen = async (): Promise<boolean> => {
         const response = await fetchDpop!(src, { signal: ac.signal });
-        if (!response.ok || !response.body) return;
+        if (!response.ok || !response.body) return false;
         const reader = response.body
           .pipeThrough(new TextDecoderStream())
           .getReader();
         let buf = "";
+        let opened = false;
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
@@ -665,11 +676,25 @@ export const ChatPanel = clientEntry(
             buf = buf.slice(idx + 2);
             const event = block.split("\n").find((l) => l.startsWith("event:"))
               ?.slice(6).trim();
-            if (event === "sync" && currentThreadId === threadId) {
-              await loadMessages();
-              handle.update();
-            }
+            if (event === "ready") opened = true;
+            if (event === "sync" && isCurrent()) await sync();
           }
+        }
+        return opened;
+      };
+      (async () => {
+        let delay = 1_000;
+        let first = true;
+        while (isCurrent()) {
+          let opened = false;
+          try {
+            if (!first) await sync(); // catch up on anything missed
+            opened = await listen();
+          } catch { /* network error or aborted */ }
+          first = false;
+          if (!isCurrent()) break;
+          delay = opened ? 1_000 : Math.min(delay * 2, 30_000);
+          await new Promise((r) => setTimeout(r, delay));
         }
       })().catch(() => {});
     };

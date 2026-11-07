@@ -16,11 +16,10 @@
  */
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { IDP_ORIGIN, RP_ORIGIN } from "./config.ts";
 
 /** The authorization server: it issues the tokens we accept here. */
-export const IDP_ORIGIN: string = Deno.env.get("IDP_ORIGIN") ??
-  "https://id.kbn.one";
-const RP_ORIGIN = Deno.env.get("RP_ORIGIN") ?? "https://home.kbn.one";
+export { IDP_ORIGIN };
 
 /** The IdP's access-token type header (RFC 9068 style). */
 const ACCESS_TOKEN_TYP = "at+jwt";

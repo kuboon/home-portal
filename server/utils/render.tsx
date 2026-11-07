@@ -18,10 +18,11 @@ import { createHtmlResponse } from "@remix-run/response/html";
 import { routes } from "../routes.ts";
 import { Document } from "../ui/document.tsx";
 import { BASE_100_DARK, BASE_100_LIGHT } from "../ui/theme_colors.ts";
+import { IDP_ORIGIN } from "../config.ts";
 
 export const FRAME_HEADER = "rmx-frame";
 
-const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const idpOrigin = IDP_ORIGIN;
 
 export const isFrameRequest = (request: Request): boolean =>
   request.headers.get(FRAME_HEADER) === "1";

@@ -11,8 +11,7 @@
  */
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
-
-const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+import { IDP_ORIGIN } from "./config.ts";
 
 /**
  * A verification key for {@link jwtVerify}: either a resolver (the IdP's

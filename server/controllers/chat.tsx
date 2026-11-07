@@ -17,10 +17,10 @@ import { ChatPanel } from "../../client/chat_panel.tsx";
 import { routes } from "../routes.ts";
 import { renderBareDocument } from "../utils/render.tsx";
 import { BASE_100_LIGHT } from "../ui/theme_colors.ts";
+import { IDP_ORIGIN, STORAGE_ORIGIN } from "../config.ts";
 
-const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
-const storageOrigin = Deno.env.get("STORAGE_ORIGIN") ??
-  "https://storage.kbn.one";
+const idpOrigin = IDP_ORIGIN;
+const storageOrigin = STORAGE_ORIGIN;
 const DEFAULT_TITLE = "home portal (ホムポタ)";
 
 async function chatPage(homeId: string, threadId: string): Promise<Response> {

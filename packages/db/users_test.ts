@@ -1,18 +1,13 @@
 /**
- * Integration test for the users table, run against an in-memory libSQL DB
- * (`:memory:`) so it executes everywhere without a network or a `turso dev`
- * server. Set `TURSO_DATABASE_URL` to a real endpoint to run it against that
- * instead.
+ * Integration test for the users table, run against an in-memory SQLite DB
+ * (`node:sqlite`, the same engine as D1) so it executes everywhere without a
+ * network.
  */
 
 import { assert, assertEquals } from "@std/assert";
-import { resetClient } from "./client.ts";
+import { resetClient } from "./sqlite.ts";
 import { migrate } from "./migrate.ts";
 import { getUser, upsertUser } from "./users.ts";
-
-if (!Deno.env.get("TURSO_DATABASE_URL")) {
-  Deno.env.set("TURSO_DATABASE_URL", ":memory:");
-}
 
 Deno.test("upsertUser inserts then updates", async () => {
   resetClient();

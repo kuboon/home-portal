@@ -9,8 +9,9 @@ import { createAction } from "@remix-run/fetch-router";
 import { AgentsPanel } from "../../client/agents_panel.tsx";
 import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
+import { IDP_ORIGIN } from "../config.ts";
 
-const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const idpOrigin = IDP_ORIGIN;
 
 export const agentsAction = createAction(routes.agents, {
   handler(context) {

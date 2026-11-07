@@ -1,11 +1,14 @@
 /**
- * Minimal forward-only migration runner for the Turso (libSQL) database.
+ * Minimal forward-only migration runner for tests and the local Deno dev
+ * server (a `node:sqlite` database, see `./sqlite.ts`).
  *
  * Applies every `migrations/NNNN_*.sql` file (in lexical order) that has not
  * yet been recorded in the `_migrations` bookkeeping table. Each file runs as
  * a batch and is recorded by filename, so re-running is a no-op.
  *
- * Run with: `deno task --cwd packages/db migrate`
+ * Production (Cloudflare D1) does not use this: the same files are applied
+ * with `cf d1 migrations apply` (tracked in D1's own `d1_migrations` table),
+ * see `cloudflare/README.md`.
  */
 
 import { db } from "./client.ts";
@@ -61,13 +64,6 @@ export async function migrate(): Promise<string[]> {
       args: [name],
     });
     applied.push(name);
-    console.log(`[migrate] applied ${name}`);
   }
-
-  if (applied.length === 0) console.log("[migrate] nothing to apply");
   return applied;
-}
-
-if (import.meta.main) {
-  await migrate();
 }

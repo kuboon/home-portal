@@ -1,0 +1,14 @@
+{
+  "name": "home-portal-cloudflare",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare deploy tooling for home portal (the app itself is built with Deno; see README.md).",
+  "scripts": {
+    "deploy": "cf deploy --prebuilt",
+    "deploy:dry-run": "cf deploy --prebuilt --dry-run"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-beta.28",
+    "wrangler": "4.158.0"
+  }
+}

@@ -6,9 +6,7 @@
 
 import { SignJWT } from "jose";
 import { getRpKey } from "./rp_key.ts";
-
-const RP_ORIGIN = Deno.env.get("RP_ORIGIN") ?? "https://home.kbn.one";
-const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+import { IDP_ORIGIN, RP_ORIGIN } from "./config.ts";
 
 const CLIENT_ASSERTION_TYP = "client-assertion+jwt";
 

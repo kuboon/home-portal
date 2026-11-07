@@ -7,11 +7,11 @@
  * - the main channel → every home member.
  * The author is always excluded. To avoid flooding an active conversation,
  * each (channel, user) pair has an exponential backoff: 1min → 2min → 4min
- * (capped), resetting after a quiet gap. State lives in Deno KV.
+ * (capped), resetting after a quiet gap. State lives in the KV table (D1).
  */
 
 import { getHome, getUser, joinedUserIds, listMembers } from "@scope/db";
-import { getKv as kv } from "./kv.ts";
+import { kvRepo } from "./kv.ts";
 import { RP_ORIGIN, sendToUsers } from "./push_send.ts";
 
 const BASE_MS = 60_000;
@@ -43,15 +43,17 @@ export function nextBackoff(
   return { send: true, next: { lastSentAt: now, intervalMs } };
 }
 
+const backoff = kvRepo<BackoffState>(["notify-backoff"], {
+  expireIn: CAP_MS * 4,
+});
+
 async function passesBackoff(
   channelKey: string,
   userId: string,
 ): Promise<boolean> {
-  const store = await kv();
-  const key = ["notify-backoff", channelKey, userId];
-  const current = (await store.get<BackoffState>(key)).value;
-  const { send, next } = nextBackoff(current, Date.now());
-  if (send) await store.set(key, next, { expireIn: CAP_MS * 4 });
+  const entry = backoff.entry(`${channelKey}|${userId}`);
+  const { send, next } = nextBackoff(await entry.get(), Date.now());
+  if (send) await entry.update(() => next);
   return send;
 }
 

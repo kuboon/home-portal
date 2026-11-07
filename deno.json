@@ -5,14 +5,15 @@
     "./packages/db",
     "./bundler",
     "./server",
-    "./client"
+    "./client",
+    "./scripts"
   ],
   "tasks": {
     "dev": "deno task --cwd server dev",
     "serve": "deno task --cwd server serve",
     "bundle": "deno task --cwd bundler build",
-    "migrate": "deno task --cwd packages/db migrate",
-    "pre-deploy": "deno task --cwd packages/db migrate:prod",
+    "build:cloudflare": "deno run -A bundler/cloudflare.ts",
+    "deploy": "deno task build:cloudflare && cd cloudflare && npx cf deploy --prebuilt",
     "test": "deno test -P",
     "check": "deno check && deno lint && deno fmt --check"
   },
@@ -23,8 +24,18 @@
     "permissions": "default"
   },
   "nodeModulesDir": "auto",
-  "unstable": ["bundle", "kv"],
+  "unstable": [
+    "bundle"
+  ],
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0"
-  }
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.4.0"
+  },
+  "exclude": [
+    "cloudflare/dist/",
+    "cloudflare/node_modules/",
+    "cloudflare/.cloudflare/",
+    "cloudflare/cloudflare.config.ts",
+    ".local/",
+    "migration-data/"
+  ]
 }

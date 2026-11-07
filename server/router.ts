@@ -1,13 +1,15 @@
 /**
- * home portal (ホムポタ) server — Remix v3 + Deno + DPoP session middleware.
+ * home portal (ホムポタ) server — Remix v3 + DPoP session middleware.
  *
  * Route definitions live in `./routes.ts`; each page/endpoint has a
  * controller under `./controllers/`. This module wires global middleware
- * (static files) and maps routes to controllers. Run with `deno serve`.
+ * and maps routes to controllers. It is runtime-neutral: the entrypoints
+ * install the database / realtime hub and decide how static files are served
+ * (`./worker.ts` on Cloudflare Workers — static assets are served by the
+ * platform before the Worker runs; `./dev.ts` for local `deno serve`).
  */
 
 import { createRouter, type Middleware } from "@remix-run/fetch-router";
-import { staticFiles } from "@remix-run/static-middleware";
 
 import { agentsController } from "./controllers/api/agents.ts";
 import { apiController } from "./controllers/api/controller.ts";
@@ -30,18 +32,13 @@ import { mcpResourceMetadataAction } from "./controllers/oauth_resource.ts";
 import { notificationsAction } from "./controllers/notifications.tsx";
 import { signinAction } from "./controllers/signin.tsx";
 import { welcomeAction } from "./controllers/welcome.tsx";
+import { IDP_ORIGIN, STORAGE_ORIGIN } from "./config.ts";
 import { routes } from "./routes.ts";
-
-const kvAccessToken = Deno.env.get("KV_ACCESS_TOKEN");
-if (kvAccessToken) Deno.env.set("DENO_KV_ACCESS_TOKEN", kvAccessToken);
 
 // The IdP origin must be reachable for the browser's DPoP `fetch` (sign-in,
 // session, logout). The storage origin hosts stamp images: the browser
 // uploads to and downloads from it directly (DPoP-authenticated fetch), and
 // renders the bytes via blob: URLs. Everything else is same-origin.
-const IDP_ORIGIN = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
-const STORAGE_ORIGIN = Deno.env.get("STORAGE_ORIGIN") ??
-  "https://storage.kbn.one";
 
 // Content-Security-Policy is the defence-in-depth partner the theme sanitizer
 // (server/theme.ts) relies on: even if a crafted theme slipped past, `url()`
@@ -72,32 +69,32 @@ const securityHeaders: Middleware = async (_context, next) => {
   return response;
 };
 
-const router = createRouter({
-  middleware: [
-    securityHeaders,
-    staticFiles(new URL("./bundled", import.meta.url).pathname),
-  ],
-});
+/**
+ * Build the app router. `extra` middleware runs after the security headers
+ * and before routing (the dev server passes its static-file handler here).
+ */
+export function createAppRouter(extra: Middleware[] = []) {
+  const router = createRouter({ middleware: [securityHeaders, ...extra] });
 
-router.get(routes.home, homeAction);
-router.get(routes.welcome, welcomeAction);
-router.get(routes.signin, signinAction);
-router.get(routes.homes, homesAction);
-router.get(routes.homeChat, homeChatAction);
-router.get(routes.homeThread, homeThreadAction);
-router.get(routes.homeManifest, homeManifestAction);
-router.get(routes.join, joinAction);
-router.get(routes.agents, agentsAction);
-router.get(routes.notifications, notificationsAction);
-router.get(routes.jwks, jwksAction);
-router.get(routes.mcpResourceMetadata, mcpResourceMetadataAction);
-router.post(routes.mcpAgent, mcpAgentAction);
-router.post(routes.mcp, mcpAction);
-router.map(routes.api, apiController);
-router.map(routes.agentsApi, agentsController);
-router.map(routes.homesApi, homesController);
-router.map(routes.invitesApi, invitesController);
-router.map(routes.stampsApi, stampsController);
-router.map(routes.threadsApi, threadsController);
-
-export default router;
+  router.get(routes.home, homeAction);
+  router.get(routes.welcome, welcomeAction);
+  router.get(routes.signin, signinAction);
+  router.get(routes.homes, homesAction);
+  router.get(routes.homeChat, homeChatAction);
+  router.get(routes.homeThread, homeThreadAction);
+  router.get(routes.homeManifest, homeManifestAction);
+  router.get(routes.join, joinAction);
+  router.get(routes.agents, agentsAction);
+  router.get(routes.notifications, notificationsAction);
+  router.get(routes.jwks, jwksAction);
+  router.get(routes.mcpResourceMetadata, mcpResourceMetadataAction);
+  router.post(routes.mcpAgent, mcpAgentAction);
+  router.post(routes.mcp, mcpAction);
+  router.map(routes.api, apiController);
+  router.map(routes.agentsApi, agentsController);
+  router.map(routes.homesApi, homesController);
+  router.map(routes.invitesApi, invitesController);
+  router.map(routes.stampsApi, stampsController);
+  router.map(routes.threadsApi, threadsController);
+  return router;
+}
