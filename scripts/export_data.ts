@@ -9,8 +9,9 @@
  *    realtime signals — is not migrated.
  *
  * The output is data only (`INSERT`s, one per line): the D1 schema comes from
- * `cf d1 migrations apply` with the same migration files. Import it with
- * `import_d1.ts`.
+ * `cf d1 migrations apply` with the same migration files. Per-table row
+ * counts go to `<out>.counts.json` so `import_d1.ts` can verify the import.
+ * Normally run by the `cloudflare` GitHub Actions workflow (`import-data`).
  *
  * Usage (run with the old deployment stopped, so nothing changes after):
  *
@@ -139,5 +140,9 @@ if (import.meta.main) {
     recursive: true,
   });
   await Deno.writeTextFile(args.out, lines.join("\n") + "\n");
+  await Deno.writeTextFile(
+    `${args.out}.counts.json`,
+    JSON.stringify(turso, null, 2) + "\n",
+  );
   console.log(`[export] wrote ${args.out}`);
 }

@@ -35,7 +35,9 @@ client / server を分離した Deno workspaces。
   `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）/
   `threads.ts`（Thread・Message）。
 - `scripts/` — Turso / Deno KV → D1 のデータ移行（`export_data.ts` /
-  `import_d1.ts`）。
+  `import_d1.ts`）と D1 REST クライアント（`cloudflare_api.ts`）。GitHub Actions
+  の `cloudflare` workflow（`setup` / `import-data` / `cutover` / `deploy`）から
+  使う。
 - `packages/session-storage-kv/` — `@remix-run/session` の `SessionStorage` を
   `KvRepo` で実装（reference から取り込み）。本番の repo は `@kuboon/kv/d1.ts`
   の `D1KvRepo`。

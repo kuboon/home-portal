@@ -61,8 +61,7 @@ deno task dev
   `cloudflare/dist/worker.js` にバンドル）
 - 設定: `cloudflare/cloudflare.config.ts`（D1 `DB`、Durable Object
   `CHANNEL_HUB`、`IDP_ORIGIN` / `RP_ORIGIN` / `STORAGE_ORIGIN`、毎時の cron）
-- D1 マイグレーション:
-  `cf d1 migrations apply <id> --dir ../packages/db/migrations`
+- D1 マイグレーション: workflow が毎回 `cf d1 migrations apply` で適用する
 - サーバ起点 Web Push を使うには、`RP_ORIGIN` を IdP（id.kbn.one）の
   `AUTHORIZE_WHITELIST` に登録する（RP の client assertion 検証のため）
 

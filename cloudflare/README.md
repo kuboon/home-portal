@@ -26,119 +26,82 @@ Deno でビルドし、このディレクトリの `cf` CLI（npm）でデプロ
   ディレクトリを指定できないため。`cf deploy --prebuilt` は Build Output の
   `assets/` をそのままアップロードする。
 
-## 事前準備
+## 移行手順（GitHub Actions だけで完結・ダウンタイムあり）
 
-```bash
-cd cloudflare && npm ci        # cf CLI（と、cf が委譲する wrangler）
-npx cf auth login              # もしくは CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
-```
+ローカル環境は要らない。ブラウザ（Cloudflare / Turso / Deno Deploy / GitHub
+のダッシュボード）と、Actions の **cloudflare** workflow
+（`.github/workflows/cloudflare.yml`、Run workflow で `step` を選ぶ）で進める。
+ダウンタイムは手順 4〜6 の間（15 分程度）。
 
-複数アカウントにアクセスできる場合は `CLOUDFLARE_ACCOUNT_ID` で kuboon
-のアカウントを指定する。
+### 1. 認証情報を GitHub に登録する
 
-## 移行手順（ダウンタイムあり）
+Settings → Secrets and variables → Actions:
 
-所要は 30 分程度。手順 4〜8 の間はサービス停止。
+| 種類     | 名前                    | 値                                                                                                  |
+| -------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
+| secret   | `CLOUDFLARE_API_TOKEN`  | 下記の権限を持つ API トークン                                                                       |
+| variable | `CLOUDFLARE_ACCOUNT_ID` | kuboon アカウントの ID（ダッシュボードの Workers & Pages 右側、または URL の `/<id>/`）             |
+| secret   | `TURSO_AUTH_TOKEN`      | Turso ダッシュボード → `home-portal-ohio` → Create Token（Read Only でよい・期限は 1 日程度でよい） |
+| secret   | `DENO_KV_URL`           | （任意）Deno Deploy の KV 画面の接続 URL（`https://api.deno.com/databases/<id>/connect`）           |
+| secret   | `DENO_KV_ACCESS_TOKEN`  | （任意）Deno Deploy のアクセストークン                                                              |
 
-### 1. D1 を作る
+- Cloudflare API トークン（My Profile → API Tokens → Create Custom Token）:
+  - Account: **Workers Scripts: Edit**, **D1: Edit**
+  - Zone `kbn.one`: **Workers Routes: Edit**, **DNS: Edit**（カスタムドメインの
+    DNS レコードと証明書を Worker が作るため）
+- Turso の URL は既定で
+  `libsql://home-portal-ohio-kuboon.aws-us-east-2.turso.io`。 違う場合は
+  variable `TURSO_DATABASE_URL` で上書きする。
+- `DENO_KV_*` を省くと、RP 署名鍵・リアクションの履歴・ログイン状態は移らない
+  （鍵は初回アクセスで作り直され、全員が一度サインインし直す。それ以外の
+  データには影響しない）。
 
-利用者に近い場所に primary を置く（Worker は smart placement で D1
-の近くで動く）。
+### 2. Deno Deploy の GitHub 連携を外し、この PR をマージする
 
-```bash
-cd cloudflare
-npx cf d1 create --name home-portal --primary-location-hint apac
-```
+Deno Deploy は旧設定（`deno task pre-deploy` で Turso にマイグレーション、
+エントリ `server/router.ts`）でビルドするので、連携したままマージすると本番の
+ビルドが失敗する。連携を外しても、動いている本番はそのまま動き続ける。
 
-出力の database ID を控える（以下 `$D1`）。
+マージしても Cloudflare には何も起きない（push での自動デプロイは
+`CLOUDFLARE_AUTO_DEPLOY` を設定するまで無効）。
 
-### 2. スキーマを適用
+### 3. `step: setup` を実行する
 
-```bash
-npx cf d1 migrations apply $D1 --dir ../packages/db/migrations
-```
+- D1 `home-portal` を作る（primary は apac。既にあれば使う）
+- スキーマ（`packages/db/migrations` の 0001〜0015）を適用する
+- Worker をデプロイする（カスタムドメインは付けない）
 
-`0001`〜`0015` が適用される（`0015_kv.sql` が Deno KV の代わりの `kv`
-テーブル）。
-
-### 3. 試しにデプロイ（ドメインはまだ付けない）
-
-```bash
-cd ..
-deno task deploy
-```
-
-`https://home-portal.<subdomain>.workers.dev` でトップページと
-`/.well-known/jwks.json` が返ることを確認する。この時点ではドメインを
-付けないので、本番トラフィックは Deno Deploy のまま。
+ジョブのサマリに D1 の ID とデプロイ先の
+`https://home-portal.<subdomain>.workers.dev` が出る。トップページと
+`/.well-known/jwks.json` が返ることを確認する。本番の トラフィックはまだ Deno
+Deploy に流れている。
 
 ### 4. Deno Deploy を止める（ダウンタイム開始）
 
-以降に Turso / Deno KV へ書き込まれたデータは移行されないので、先に止める。
-同時に Deno Deploy の GitHub 連携を外す。
+以降に Turso / Deno KV へ書き込まれたデータは移らないので、先に止める。
 
-この移行の PR は **ここで main にマージする**（手順 1〜3 はブランチから実行
-できる）。Deno Deploy は旧設定（`deno task pre-deploy` で Turso にマイグレー
-ション、エントリ `server/router.ts`）でビルドするので、連携したままマージすると
-本番のビルドが失敗する。PR 上の `deploy/kbn/home-portal` ステータスが赤いのも
-同じ理由で、想定どおり。
+### 5. `step: import-data` を実行する
 
-### 5. データをエクスポート
+- Turso の全テーブルを外部キー順に、Deno KV から RP 署名鍵・リアクションの
+  履歴・ログイン状態（1 時間の TTL を付け直す）を書き出す。招待・レート制限・
+  通知バックオフ・リアルタイムのシグナルは一時的な状態なので移さない。
+- 空の D1 に取り込み、テーブルごとの件数を Turso と突き合わせる（ジョブの
+  サマリに表が出る。1 つでも違えばジョブが失敗する）。
+- D1 に既にユーザーがいれば取り込まずに失敗する（二重投入の防止）。
+- ダンプはランナー上でだけ作り、ジョブの最後に消す（Artifact にはしない）。
 
-```bash
-TURSO_DATABASE_URL=libsql://home-portal-ohio-kuboon.aws-us-east-2.turso.io \
-TURSO_AUTH_TOKEN="$(turso db tokens create home-portal-ohio --expiration 1d)" \
-DENO_KV_ACCESS_TOKEN=<Deno Deploy のアクセストークン> \
-deno run -A --unstable-kv scripts/export_data.ts --kv <Deno KV の接続 URL>
-```
-
-- `migration-data/data.sql`（gitignore 済み・利用者データを含むので扱い注意）に
-  全テーブルの INSERT と、Deno KV のうち残す価値のある値が出力される。
-  - RP 署名鍵 `rp_signing_key`: IdP は JWKS の `kid` で検証するので、同じ鍵を
-    引き継ぐと push 通知が切れ目なく動く。
-  - `recent-emoji`（リアクションの履歴）
-  - `dpop-session`（ログイン状態。1 時間の TTL を付け直す）
-  - 招待トークン・レート制限・通知バックオフ・リアルタイムのシグナルは一時的な
-    状態なので移さない。
-- Deno KV の接続 URL は Deno Deploy の KV 画面にある
-  `https://api.deno.com/databases/<id>/connect` 形式のもの。取れない場合は
-  `--kv` を省略してよい。その場合 RP 署名鍵は初回アクセス時に作り直され（IdP は
-  新しい `kid` で JWKS を取り直す）、全員が一度サインインし直すことになる。
-
-### 6. D1 にインポート
-
-```bash
-deno run -A scripts/import_d1.ts $D1
-```
-
-空の D1（手順 2 の直後）に対して 1 回だけ実行する。100 文ずつ、1 バッチ 1
-トランザクションで `cf d1 query` に流す。
-
-### 7. 件数を突き合わせる
-
-```bash
-cd cloudflare
-npx cf d1 query $D1 --sql "SELECT (SELECT count(*) FROM users) users, (SELECT count(*) FROM homes) homes, (SELECT count(*) FROM memberships) memberships, (SELECT count(*) FROM threads) threads, (SELECT count(*) FROM messages) messages, (SELECT count(*) FROM reactions) reactions, (SELECT count(*) FROM stamps) stamps, (SELECT count(*) FROM user_stamps) user_stamps, (SELECT count(*) FROM thread_participants) thread_participants, (SELECT count(*) FROM agents) agents"
-```
-
-同じ SQL を Turso（`turso db shell home-portal-ohio`）でも流し、一致を確認する。
-エクスポート時に表示されたテーブル別件数とも比べられる。
-
-### 8. ドメインを付け替える
+### 6. ドメインを付け替えて `step: cutover` を実行する（ダウンタイム終了）
 
 1. Deno Deploy のプロジェクトから `home.kbn.one` を外し、`home.kbn.one` の 既存
-   DNS レコード（Deno Deploy 向け）を削除する。
-2. カスタムドメイン付きでデプロイする（`kbn.one` ゾーンが同じ Cloudflare
-   アカウントにある前提。Worker の Custom Domain が DNS と証明書を作る）。
-
-   ```bash
-   HOME_PORTAL_DOMAIN=home.kbn.one deno task deploy
-   ```
+   DNS レコード（Deno Deploy 向け）を Cloudflare の DNS 画面で削除する。
+2. variable `HOME_PORTAL_DOMAIN` = `home.kbn.one` を設定する。
+3. `step: cutover` を実行する。マイグレーションを適用し、カスタムドメイン付きで
+   デプロイする（Worker の Custom Domain が DNS レコードと証明書を作る）。
 
 `RP_ORIGIN` は以前と同じ `https://home.kbn.one` なので、IdP の
 `AUTHORIZE_WHITELIST` は変更不要。
 
-### 9. 動作確認（ダウンタイム終了）
+### 7. 動作確認
 
 - サインイン、Home 一覧、スレッド表示
 - 2 つのタブで同じスレッドを開き、投稿・編集・削除・リアクションが即時反映される
@@ -146,31 +109,38 @@ npx cf d1 query $D1 --sql "SELECT (SELECT count(*) FROM users) users, (SELECT co
 - テスト通知と、別ユーザーの投稿による push 通知
 - MCP（`POST /mcp/<agentId>`）
 
-### 10. 自動デプロイを有効にする
+### 8. 自動デプロイを有効にする
 
-GitHub の Settings → Secrets and variables → Actions に:
-
-- secret `CLOUDFLARE_API_TOKEN`（Workers Scripts / D1 / Workers Routes
-  編集権限）
-- variable `CLOUDFLARE_ACCOUNT_ID`
-- variable `D1_DATABASE_ID`（`$D1`）— これを設定するまで `deploy` workflow は
-  何もしない
-- variable `HOME_PORTAL_DOMAIN` = `home.kbn.one`
-
-以後 main への push で、ビルド → D1 マイグレーション → デプロイが走る。 Deno
-Deploy の GitHub 連携は外しておく。
+variable `CLOUDFLARE_AUTO_DEPLOY` = `true`。以後 main への push で、ビルド → D1
+マイグレーション → デプロイ（`HOME_PORTAL_DOMAIN` 付き）が走る。
+手動で出したいときは `step: deploy`。
 
 ### ロールバック
 
-- 手順 8 より前なら、Deno Deploy を再開するだけでよい（Turso / Deno KV は
+- 手順 6 より前なら、Deno Deploy を再開するだけでよい（Turso / Deno KV には
   手を付けていない）。
-- 手順 8 の後に戻す場合、Cloudflare 側で増えた投稿は Turso に無い。D1 から
-  `export_data.ts` と同じ形式で書き戻す必要がある。
+- 手順 6 の後に戻す場合、Cloudflare 側で増えた投稿は Turso に無い。D1 から
+  書き戻す必要がある。
 
 ### 後片付け（しばらく様子を見てから）
 
-- Turso の `home-portal-ohio` と Deno Deploy のプロジェクト・KV を削除する。
-- `migration-data/` を削除する。
+- Turso の `home-portal-ohio`、Deno Deploy のプロジェクトと KV を削除する。
+- secrets `TURSO_AUTH_TOKEN` / `DENO_KV_URL` / `DENO_KV_ACCESS_TOKEN` を削除し、
+  Turso のトークンを失効させる。
+
+## ローカルから操作する場合（任意）
+
+workflow と同じことを手元でもできる（`cd cloudflare && npm ci`、
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` を環境変数に設定）:
+
+```bash
+deno run -A scripts/cloudflare_api.ts ensure   # D1 を作成/検索して ID を表示
+(cd cloudflare && npx cf d1 migrations apply <ID> --dir ../packages/db/migrations)
+deno task deploy                               # HOME_PORTAL_DOMAIN でドメイン付与
+TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… DENO_KV_ACCESS_TOKEN=… \
+  deno run -A --unstable-kv scripts/export_data.ts [--kv <Deno KV URL>]
+deno run -A scripts/import_d1.ts               # 取り込み + 件数検証
+```
 
 ## 運用メモ
 

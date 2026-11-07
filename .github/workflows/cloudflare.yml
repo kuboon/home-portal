@@ -1,0 +1,132 @@
+name: cloudflare
+
+# Cloudflare Workers deploy + the one-off migration from Deno Deploy / Turso.
+# Everything runs here; see cloudflare/README.md for the order.
+#
+# Manual runs (Actions → cloudflare → Run workflow), pick `step`:
+#   setup        create D1 `home-portal` (if missing), apply migrations,
+#                deploy to workers.dev only (no custom domain)
+#   import-data  export Turso (+ Deno KV if configured) and import into the
+#                empty D1, then verify row counts (job summary)
+#   cutover      apply migrations, deploy with the custom domain
+#                (vars.HOME_PORTAL_DOMAIN)
+#   deploy       same as a push to main
+# Pushes to main deploy only when vars.CLOUDFLARE_AUTO_DEPLOY == 'true'.
+#
+# Secrets: CLOUDFLARE_API_TOKEN; for import-data also TURSO_AUTH_TOKEN and,
+# optionally, DENO_KV_URL + DENO_KV_ACCESS_TOKEN.
+# Variables: CLOUDFLARE_ACCOUNT_ID; HOME_PORTAL_DOMAIN (set before cutover);
+# TURSO_DATABASE_URL (optional override); CLOUDFLARE_AUTO_DEPLOY.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      step:
+        description: What to run
+        type: choice
+        options: [setup, import-data, cutover, deploy]
+        default: setup
+
+concurrency:
+  group: cloudflare
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cloudflare:
+    if: github.event_name == 'workflow_dispatch' || vars.CLOUDFLARE_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      STEP: ${{ inputs.step || 'deploy' }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - name: Check configuration
+        env:
+          HOME_PORTAL_DOMAIN: ${{ vars.HOME_PORTAL_DOMAIN }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || fail "secret CLOUDFLARE_API_TOKEN is not set"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || fail "variable CLOUDFLARE_ACCOUNT_ID is not set"
+          case "$STEP" in
+            setup)
+              # A deploy without the domain could detach it after cutover.
+              [ -z "$HOME_PORTAL_DOMAIN" ] || fail "HOME_PORTAL_DOMAIN is set (already cut over?); use step=deploy" ;;
+            cutover|deploy)
+              [ -n "$HOME_PORTAL_DOMAIN" ] || fail "variable HOME_PORTAL_DOMAIN is not set (e.g. home.kbn.one)" ;;
+          esac
+
+      - name: Install cf CLI
+        working-directory: cloudflare
+        run: npm ci
+
+      - name: Resolve D1 database
+        id: d1
+        run: |
+          if [ "$STEP" = setup ]; then cmd=ensure; else cmd=id; fi
+          id=$(deno run -A scripts/cloudflare_api.ts "$cmd")
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "D1 \`home-portal\`: \`$id\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply D1 migrations
+        working-directory: cloudflare
+        run: npx cf d1 migrations apply "${{ steps.d1.outputs.id }}" --dir ../packages/db/migrations
+
+      - name: Export Turso / Deno KV
+        if: env.STEP == 'import-data'
+        env:
+          TURSO_DATABASE_URL: ${{ vars.TURSO_DATABASE_URL || 'libsql://home-portal-ohio-kuboon.aws-us-east-2.turso.io' }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          DENO_KV_URL: ${{ secrets.DENO_KV_URL }}
+          DENO_KV_ACCESS_TOKEN: ${{ secrets.DENO_KV_ACCESS_TOKEN }}
+        run: |
+          [ -n "$TURSO_AUTH_TOKEN" ] || { echo "::error::secret TURSO_AUTH_TOKEN is not set"; exit 1; }
+          args=()
+          if [ -n "$DENO_KV_URL" ]; then
+            args=(--kv "$DENO_KV_URL")
+          else
+            echo "::warning::DENO_KV_URL not set: sessions, the RP signing key and recent emoji are not migrated"
+          fi
+          deno run -A --unstable-kv scripts/export_data.ts "${args[@]}"
+
+      - name: Import into D1 and verify
+        if: env.STEP == 'import-data'
+        run: deno run -A scripts/import_d1.ts migration-data/data.sql
+
+      - name: Remove the dump
+        if: always() && env.STEP == 'import-data'
+        run: rm -rf migration-data
+
+      - name: Build
+        if: env.STEP != 'import-data'
+        run: deno task build:cloudflare
+
+      - name: Deploy
+        if: env.STEP != 'import-data'
+        working-directory: cloudflare
+        env:
+          # Read by cloudflare.config.ts: attaches the custom domain.
+          HOME_PORTAL_DOMAIN: ${{ env.STEP != 'setup' && vars.HOME_PORTAL_DOMAIN || '' }}
+        run: |
+          npx cf deploy --prebuilt 2>&1 | tee deploy.log
+          {
+            echo '### Deploy'
+            echo '```'
+            grep -Ei 'https://|deployed|version' deploy.log | tail -n 20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
