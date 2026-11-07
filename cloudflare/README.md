@@ -75,6 +75,13 @@ deno task deploy
 ### 4. Deno Deploy を止める（ダウンタイム開始）
 
 以降に Turso / Deno KV へ書き込まれたデータは移行されないので、先に止める。
+同時に Deno Deploy の GitHub 連携を外す。
+
+この移行の PR は **ここで main にマージする**（手順 1〜3 はブランチから実行
+できる）。Deno Deploy は旧設定（`deno task pre-deploy` で Turso にマイグレー
+ション、エントリ `server/router.ts`）でビルドするので、連携したままマージすると
+本番のビルドが失敗する。PR 上の `deploy/kbn/home-portal` ステータスが赤いのも
+同じ理由で、想定どおり。
 
 ### 5. データをエクスポート
 
