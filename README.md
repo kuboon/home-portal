@@ -53,9 +53,8 @@ deno task dev
 
 ## デプロイ（Cloudflare Workers）
 
-[`cloudflare/README.md`](./cloudflare/README.md)
-を参照（構成、初回セットアップ、 Deno Deploy / Turso
-からのデータ移行手順、GitHub Actions による自動デプロイ）。
+GitHub Actions の `cloudflare` workflow（`setup` / `import-data` / `cutover` /
+`deploy`）で完結する。手順は [`cloudflare/README.md`](./cloudflare/README.md)。
 
 - Worker のエントリポイント: `server/worker.ts`（`Deno.bundle` で
   `cloudflare/dist/worker.js` にバンドル）
