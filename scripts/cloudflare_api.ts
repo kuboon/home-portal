@@ -89,7 +89,46 @@ export function query(id: string, sql: string): Promise<QueryResult[]> {
   return call<QueryResult[]>("POST", `/d1/database/${id}/query`, { sql });
 }
 
-/** CLI: `deno run -A scripts/cloudflare_api.ts ensure|id [name]`. */
+/**
+ * Probe what the token can reach, so a 403 from `cf deploy` can be traced to
+ * a missing permission. Read-only: every call is a GET. Returns the lines of
+ * a Markdown table and whether every probe passed.
+ */
+export async function checkToken(): Promise<{ ok: boolean; lines: string[] }> {
+  const { token, account } = credentials();
+  const probes: [string, string][] = [
+    ["token (user-owned)", "/user/tokens/verify"],
+    ["token (account-owned)", `/accounts/${account}/tokens/verify`],
+    ["Workers Scripts", `/accounts/${account}/workers/scripts`],
+    ["workers.dev subdomain", `/accounts/${account}/workers/subdomain`],
+    [
+      "Durable Objects",
+      `/accounts/${account}/workers/durable_objects/namespaces`,
+    ],
+    ["D1", `/accounts/${account}/d1/database`],
+  ];
+  const lines = ["| API | status | |", "| --- | --- | --- |"];
+  const results: Record<string, boolean> = {};
+  for (const [label, path] of probes) {
+    const res = await fetch(`${API}${path}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const data = await res.json().catch(() => ({})) as Envelope<unknown>;
+    const ok = res.ok && data.success !== false;
+    results[label] = ok;
+    const error = (data.errors ?? []).map((e) => `${e.code} ${e.message}`)
+      .join("; ");
+    lines.push(`| ${label} | ${res.status} | ${ok ? "✅" : `❌ ${error}`} |`);
+  }
+  // Exactly one of the two verify endpoints applies to a given token.
+  const tokenOk = results["token (user-owned)"] ||
+    results["token (account-owned)"];
+  const ok = tokenOk &&
+    Object.entries(results).every(([k, v]) => k.startsWith("token") || v);
+  return { ok, lines };
+}
+
+/** CLI: `deno run -A scripts/cloudflare_api.ts ensure|id|check [name]`. */
 if (import.meta.main) {
   const [command, name = D1_NAME] = Deno.args;
   if (command === "ensure") {
@@ -103,8 +142,20 @@ if (import.meta.main) {
       Deno.exit(1);
     }
     console.log(id);
+  } else if (command === "check") {
+    const { ok, lines } = await checkToken();
+    const table = ["### Cloudflare API token", "", ...lines, ""].join("\n");
+    console.log(table);
+    const summary = Deno.env.get("GITHUB_STEP_SUMMARY");
+    if (summary) await Deno.writeTextFile(summary, table, { append: true });
+    if (!ok) {
+      console.error(
+        "[check] the token cannot reach every API the deploy needs",
+      );
+      Deno.exit(1);
+    }
   } else {
-    console.error("usage: cloudflare_api.ts ensure|id [name]");
+    console.error("usage: cloudflare_api.ts ensure|id|check [name]");
     Deno.exit(2);
   }
 }

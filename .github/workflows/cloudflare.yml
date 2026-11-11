@@ -75,6 +75,9 @@ jobs:
         working-directory: cloudflare
         run: npm ci
 
+      - name: Check Cloudflare API token
+        run: deno run -A scripts/cloudflare_api.ts check
+
       - name: Resolve D1 database
         id: d1
         run: |
@@ -123,6 +126,9 @@ jobs:
           # Read by cloudflare.config.ts: attaches the custom domain.
           HOME_PORTAL_DOMAIN: ${{ env.STEP != 'setup' && vars.HOME_PORTAL_DOMAIN || '' }}
         run: |
+          # pipefail: without it the step takes tee's exit status, so a
+          # failed deploy would show as green.
+          set -o pipefail
           npx cf deploy --prebuilt 2>&1 | tee deploy.log
           {
             echo '### Deploy'
