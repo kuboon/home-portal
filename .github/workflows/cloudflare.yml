@@ -75,6 +75,9 @@ jobs:
         working-directory: cloudflare
         run: npm ci
 
+      - name: Check Cloudflare API token
+        run: deno run -A scripts/cloudflare_api.ts check
+
       - name: Resolve D1 database
         id: d1
         run: |
