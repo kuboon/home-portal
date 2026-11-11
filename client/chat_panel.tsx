@@ -1,6 +1,6 @@
 /**
- * ChatPanel — the URL-driven chat view for one home (`/home/:homeId` and
- * `/home/:homeId/thread/:threadId`).
+ * ChatPanel — the URL-driven chat view for one home (`/home/:homeId`,
+ * `/home/:homeId/thread/:threadId`, and `/home/:homeId/calendar`).
  *
  * Layout: a left sidebar listing the main channel + every thread, and a right
  * conversation pane. On desktop both are always shown side by side. On mobile
@@ -11,7 +11,8 @@
  *
  * The "main channel" is the home's thread-less conversation; selecting it or a
  * thread swaps the conversation client-side and updates the URL (pushState)
- * without a full navigation.
+ * without a full navigation. The calendar (`calendar_view.tsx`) is a third
+ * thing the content pane can show, switched the same way.
  */
 
 import {
@@ -24,6 +25,7 @@ import { createA2hs, showA2hsGuide } from "@kuboon/browser-how-to/a2hs/ui";
 import { qrPath } from "./qr.ts";
 import { ensureSession, type FetchDpop } from "./session.ts";
 import { splitLinks } from "./linkify.ts";
+import { createCalendarView } from "./calendar_view.tsx";
 import {
   storageImageUrl,
   type StorageSession,
@@ -94,6 +96,8 @@ export interface ChatPanelProps {
   homeId: string;
   /** Initial thread id from the URL, or "" for the main channel. */
   threadId: string;
+  /** Initial pane from the URL: "chat" (default) or "calendar". */
+  view?: string;
   [key: string]: SerializableValue;
 }
 
@@ -241,6 +245,10 @@ export const ChatPanel = clientEntry(
     let role: "admin" | "member" | null = null;
     let threads: Thread[] = [];
     let currentThreadId: string | null = handle.props.threadId || null;
+    /** What the content pane shows: the conversation, or the calendar. */
+    let view: "chat" | "calendar" = handle.props.view === "calendar"
+      ? "calendar"
+      : "chat";
     let messages: Message[] = [];
     let newMessage = "";
     /** 送信 API の完了待ちの間だけ画面に出す楽観的メッセージ。 */
@@ -402,6 +410,18 @@ export const ChatPanel = clientEntry(
         handle.update();
       }
     };
+
+    // userId / role / fetchDpop are filled in by the async startup below, after
+    // this runs, so the calendar reads them through getters.
+    const calendar = createCalendarView({
+      api,
+      homeId,
+      userId: () => userId,
+      isAdmin: () => role === "admin",
+      fetchDpop: () => fetchDpop,
+      update: () => handle.update(),
+      run,
+    });
 
     const loadHome = async () => {
       const data = await api("/api/homes") as { homes: HomeWithRole[] };
@@ -676,9 +696,63 @@ export const ChatPanel = clientEntry(
 
     const urlFor = (threadId: string | null) =>
       threadId ? `/home/${homeId}/thread/${threadId}` : `/home/${homeId}`;
+    const calendarUrl = () => `/home/${homeId}/calendar`;
+
+    /**
+     * Read the pane and channel from the URL (for back/forward). Mirrors the
+     * server routes: `/home/:id/calendar`, `/home/:id/thread/:tid`, `/home/:id`.
+     */
+    const parseLocation = (): {
+      view: "chat" | "calendar";
+      threadId: string | null;
+    } => {
+      const path = location.pathname;
+      if (/^\/home\/[^/]+\/calendar\/?$/.test(path)) {
+        return { view: "calendar", threadId: null };
+      }
+      const m = path.match(/\/home\/[^/]+\/thread\/([^/]+)/);
+      return { view: "chat", threadId: m ? m[1] : null };
+    };
+
+    /** Leave the calendar (if on it) for the conversation pane. */
+    const leaveCalendar = () => {
+      if (view !== "calendar") return;
+      view = "chat";
+      calendar.stop();
+      calendar.closeSheet();
+    };
+
+    /** Show the calendar pane. The chat stream is not needed meanwhile. */
+    const enterCalendar = async () => {
+      view = "calendar";
+      currentThreadId = null;
+      paletteFor = null;
+      stampPickerOpen = false;
+      menuFor = null;
+      editingId = null;
+      editInfoOpen = false;
+      streamAbort?.abort();
+      streamAbort = null;
+      calendar.start();
+      await calendar.load();
+    };
+
+    const selectCalendar = () =>
+      run(async () => {
+        if (view === "calendar") {
+          closeDrawer();
+          return;
+        }
+        if (typeof history !== "undefined") {
+          history.pushState({}, "", calendarUrl());
+        }
+        closeDrawer();
+        await enterCalendar();
+      });
 
     const selectChannel = (threadId: string | null) =>
       run(async () => {
+        leaveCalendar();
         currentThreadId = threadId;
         paletteFor = null;
         stampPickerOpen = false;
@@ -1119,13 +1193,20 @@ export const ChatPanel = clientEntry(
 
     if (typeof document !== "undefined") {
       // Keep the view in sync with browser back/forward.
+      // The pane (chat / calendar) is part of the URL too, so compare both:
+      // `/home/h/calendar` and `/home/h` both have no thread, and comparing
+      // only the thread would leave the calendar up after "back".
       globalThis.addEventListener("popstate", () => {
-        const m = location.pathname.match(/\/home\/[^/]+\/thread\/([^/]+)/);
-        const threadId = m ? m[1] : null;
-        if (threadId !== currentThreadId) {
-          currentThreadId = threadId;
+        const next = parseLocation();
+        if (next.view === "calendar") {
+          if (view !== "calendar") run(enterCalendar);
+          return;
+        }
+        if (view === "calendar" || next.threadId !== currentThreadId) {
+          leaveCalendar();
+          currentThreadId = next.threadId;
           loadMessages().then(() => {
-            startStream(threadId);
+            startStream(next.threadId);
             handle.update();
           }).catch(() => {});
         }
@@ -1151,7 +1232,12 @@ export const ChatPanel = clientEntry(
             ]);
             const failed = results.find((r) => r.status === "rejected");
             if (failed) throw (failed as PromiseRejectedResult).reason;
-            startStream(currentThreadId);
+            if (view === "calendar") {
+              calendar.start();
+              await calendar.load();
+            } else {
+              startStream(currentThreadId);
+            }
             // ホームを開けたら、必要なら A2HS 案内をポップアップ。
             maybePromptA2hs(homeId);
           }
@@ -1737,7 +1823,9 @@ export const ChatPanel = clientEntry(
       label: string,
       icon = "#",
     ) => {
-      const active = currentThreadId === threadId;
+      // On the calendar there is no active channel (currentThreadId is null
+      // there too, which would otherwise light up 「メイン」).
+      const active = view === "chat" && currentThreadId === threadId;
       return (
         <button
           type="button"
@@ -1789,6 +1877,28 @@ export const ChatPanel = clientEntry(
           : []),
       ];
 
+    /** サイドバーの「カレンダー」行。見た目は channelItem に揃える。 */
+    const calendarItem = () => {
+      const active = view === "calendar";
+      return (
+        <button
+          type="button"
+          key="__calendar__"
+          class={`w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${
+            active
+              ? "bg-base-content/10 font-semibold"
+              : "opacity-70 hover:bg-base-content/5 hover:opacity-100"
+          }`}
+          mix={[on("click", selectCalendar)]}
+        >
+          <span class="shrink-0 w-4 text-center opacity-60 font-normal">
+            📅
+          </span>
+          <span class="truncate flex-1">カレンダー</span>
+        </button>
+      );
+    };
+
     const sidebar = () => (
       <aside
         id={SIDE_ID}
@@ -1807,6 +1917,7 @@ export const ChatPanel = clientEntry(
         </div>
         <nav class="flex-1 overflow-y-auto px-2 py-2">
           {channelItem(null, "メイン")}
+          {calendarItem()}
           {threadGroup(
             "参加中",
             threads.filter((t) => !t.archivedAt && t.joined),
@@ -2397,6 +2508,7 @@ export const ChatPanel = clientEntry(
         <div class="chat-shell">
           {settingsOpen ? settingsOverlay() : null}
           {menuFor ? contextSheet() : null}
+          {calendar.sheet()}
           {
             /* DOM 順は [本文, サイドバー]。容器の direction: rtl でスクロール
               原点が右端になるため、初期位置は本文になり、サイドバーは画面外
@@ -2414,8 +2526,10 @@ export const ChatPanel = clientEntry(
                 ☰
               </button>
               <h2 class="font-bold truncate flex-1">
-                <span class="opacity-40 font-normal mr-1">#</span>
-                {channelName()}
+                <span class="opacity-40 font-normal mr-1">
+                  {view === "calendar" ? "📅" : "#"}
+                </span>
+                {view === "calendar" ? "カレンダー" : channelName()}
               </h2>
               {currentThreadId &&
                   (currentThread()?.createdBy === userId || role === "admin")
@@ -2458,234 +2572,254 @@ export const ChatPanel = clientEntry(
               )
               : null}
 
-            <div class="chat-messages flex-1 min-h-0 overflow-y-auto flex flex-col-reverse py-2">
-              {messages.length === 0 &&
-                  !pendingPosts.some((p) => p.threadId === currentThreadId)
+            {
+              /* An array, not a <>…</> fragment: a fragment renders nothing in
+                this slot (@remix-run/ui 0.8), and an array keeps the DOM exactly
+                as before, so home-theme selectors on .chat-messages still match. */
+            }
+            {view === "calendar" ? calendar.render() : [
+              <div
+                key="messages"
+                class="chat-messages flex-1 min-h-0 overflow-y-auto flex flex-col-reverse py-2"
+              >
+                {messages.length === 0 &&
+                    !pendingPosts.some((p) => p.threadId === currentThreadId)
+                  ? (
+                    <div class="flex-1 flex items-center justify-center opacity-60">
+                      まだメッセージがありません。
+                    </div>
+                  )
+                  : messageList()}
+              </div>,
+              archived()
                 ? (
-                  <div class="flex-1 flex items-center justify-center opacity-60">
-                    まだメッセージがありません。
+                  <div key="archived" class="alert alert-soft m-2">
+                    <span>
+                      このスレッドはアーカイブ済みです（読み取り専用）。
+                    </span>
                   </div>
                 )
-                : messageList()}
-            </div>
-
-            {archived()
-              ? (
-                <div class="alert alert-soft m-2">
-                  <span>
-                    このスレッドはアーカイブ済みです（読み取り専用）。
-                  </span>
-                </div>
-              )
-              : (
-                <div class="chat-composer px-3 pb-3 pt-1 shrink-0">
-                  {editingId
-                    ? (
-                      <div class="mb-1 px-1">
-                        <div class="flex items-center gap-1 text-sm">
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs btn-circle"
-                            aria-label="編集をやめる"
-                            title="編集をやめる"
-                            mix={[on("click", cancelEdit)]}
-                          >
-                            ✕
-                          </button>
-                          <span class="font-semibold">メッセージの編集</span>
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs btn-circle"
-                            aria-label="説明"
-                            title="説明"
-                            mix={[on("click", () => {
-                              editInfoOpen = !editInfoOpen;
-                              handle.update();
-                            })]}
-                          >
-                            ⓘ
-                          </button>
-                        </div>
-                        {editInfoOpen
-                          ? (
-                            <div class="mt-1 rounded-lg bg-base-200 p-2 text-xs opacity-80">
-                              編集したメッセージは新規投稿となります。
-                            </div>
-                          )
-                          : null}
-                      </div>
-                    )
-                    : null}
-                  {stampPickerOpen && !editingId ? stampPicker() : null}
-                  {!editingId && (pendingImage || imageUploading)
-                    ? (
-                      <div class="mb-1 flex items-center gap-2">
-                        {imageUploading
-                          ? (
-                            <div class="flex items-center gap-2 text-sm opacity-70">
-                              <span class="loading loading-spinner loading-sm">
-                              </span>
-                              画像をアップロード中…
-                            </div>
-                          )
-                          : pendingImage
-                          ? (
-                            <div class="relative">
-                              <img
-                                src={pendingImage.previewUrl}
-                                alt="添付プレビュー"
-                                class="h-20 w-20 object-cover rounded-lg border border-base-300"
-                              />
-                              <button
-                                type="button"
-                                class="btn btn-xs btn-circle absolute -top-2 -right-2"
-                                aria-label="添付を取り消す"
-                                title="添付を取り消す"
-                                mix={[on("click", () => {
-                                  clearAttachment();
-                                  handle.update();
-                                })]}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          )
-                          : null}
-                      </div>
-                    )
-                    : null}
+                : (
                   <div
-                    class={`flex items-center gap-1 rounded-xl border bg-base-100 px-2 py-1 shadow-sm transition-colors ${
-                      editingId
-                        ? "border-warning"
-                        : "border-base-300 focus-within:border-base-content/40"
-                    }`}
+                    key="composer"
+                    class="chat-composer px-3 pb-3 pt-1 shrink-0"
                   >
-                    <input
-                      id={COMPOSER_INPUT_ID}
-                      class="flex-1 min-w-0 bg-transparent border-0 outline-none px-2 py-2"
-                      placeholder={editingId
-                        ? "メッセージを編集…"
-                        : `#${channelName()} へメッセージを送信`}
-                      value={newMessage}
-                      mix={[
-                        on<HTMLInputElement>("input", (e) => {
-                          newMessage = (e.target as HTMLInputElement).value;
-                          handle.update();
-                        }),
-                        on("keydown", (e) => {
-                          // IME 変換確定の Enter（isComposing）では送信しない。
-                          if (e.key === "Enter" && !e.isComposing) {
-                            e.preventDefault();
-                            onPost();
-                          } else if (e.key === "Escape" && editingId) {
-                            e.preventDefault();
-                            cancelEdit();
-                          }
-                        }),
-                      ]}
-                    />
-                    {!editingId
+                    {editingId
                       ? (
-                        <label
-                          class="btn btn-ghost btn-sm btn-circle"
-                          aria-label="画像を添付"
-                          title="画像を添付"
-                        >
-                          {/* 画像（山と太陽）アイコン */}
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            aria-hidden="true"
-                          >
-                            <rect x="3" y="3" width="18" height="18" rx="2" />
-                            <circle cx="9" cy="9" r="1.6" />
-                            <path d="M21 15l-4.5-4.5L7 20" />
-                          </svg>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            class="hidden"
-                            disabled={imageUploading}
-                            mix={[on<HTMLInputElement>("change", (e) => {
-                              const input = e.target as HTMLInputElement;
-                              const file = input.files?.[0];
-                              input.value = "";
-                              if (file) onAttachImage(file);
-                            })]}
-                          />
-                        </label>
+                        <div class="mb-1 px-1">
+                          <div class="flex items-center gap-1 text-sm">
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs btn-circle"
+                              aria-label="編集をやめる"
+                              title="編集をやめる"
+                              mix={[on("click", cancelEdit)]}
+                            >
+                              ✕
+                            </button>
+                            <span class="font-semibold">
+                              メッセージの編集
+                            </span>
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs btn-circle"
+                              aria-label="説明"
+                              title="説明"
+                              mix={[on("click", () => {
+                                editInfoOpen = !editInfoOpen;
+                                handle.update();
+                              })]}
+                            >
+                              ⓘ
+                            </button>
+                          </div>
+                          {editInfoOpen
+                            ? (
+                              <div class="mt-1 rounded-lg bg-base-200 p-2 text-xs opacity-80">
+                                編集したメッセージは新規投稿となります。
+                              </div>
+                            )
+                            : null}
+                        </div>
                       )
                       : null}
-                    {!editingId
+                    {stampPickerOpen && !editingId ? stampPicker() : null}
+                    {!editingId && (pendingImage || imageUploading)
                       ? (
-                        <button
-                          type="button"
-                          class={`btn btn-ghost btn-sm btn-circle ${
-                            stampPickerOpen ? "btn-active" : ""
-                          }`}
-                          aria-label="スタンプ"
-                          title="スタンプ"
-                          mix={[
-                            on("pointerdown", (e) => e.preventDefault()),
-                            on("click", toggleStampPicker),
-                          ]}
-                        >
-                          {/* 角がめくれたステッカー + 笑顔 */}
-                          <svg
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            aria-hidden="true"
-                          >
-                            <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
-                            <path d="M15 3v3.5a2 2 0 0 0 2 2h3.5" />
-                            <path d="M8.5 13h.01" />
-                            <path d="M14.5 13h.01" />
-                            <path d="M9.5 16.2s1 1.1 2.5 1.1 2.5-1.1 2.5-1.1" />
-                          </svg>
-                        </button>
+                        <div class="mb-1 flex items-center gap-2">
+                          {imageUploading
+                            ? (
+                              <div class="flex items-center gap-2 text-sm opacity-70">
+                                <span class="loading loading-spinner loading-sm">
+                                </span>
+                                画像をアップロード中…
+                              </div>
+                            )
+                            : pendingImage
+                            ? (
+                              <div class="relative">
+                                <img
+                                  src={pendingImage.previewUrl}
+                                  alt="添付プレビュー"
+                                  class="h-20 w-20 object-cover rounded-lg border border-base-300"
+                                />
+                                <button
+                                  type="button"
+                                  class="btn btn-xs btn-circle absolute -top-2 -right-2"
+                                  aria-label="添付を取り消す"
+                                  title="添付を取り消す"
+                                  mix={[on("click", () => {
+                                    clearAttachment();
+                                    handle.update();
+                                  })]}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            )
+                            : null}
+                        </div>
                       )
                       : null}
-                    <button
-                      type="button"
-                      class="btn btn-primary btn-sm btn-circle"
-                      aria-label={editingId ? "更新" : "送信"}
-                      title={editingId ? "更新" : "送信"}
-                      disabled={!newMessage.trim() &&
-                        !(pendingImage && !editingId)}
-                      mix={[
-                        // タップ/クリックで入力欄からフォーカスを奪わない
-                        // （スマホのキーボードが閉じないように）。click は
-                        // pointerdown を打ち消しても発火する。
-                        on("pointerdown", (e) => e.preventDefault()),
-                        on("click", onPost),
-                      ]}
+                    <div
+                      class={`flex items-center gap-1 rounded-xl border bg-base-100 px-2 py-1 shadow-sm transition-colors ${
+                        editingId
+                          ? "border-warning"
+                          : "border-base-300 focus-within:border-base-content/40"
+                      }`}
                     >
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        aria-hidden="true"
+                      <input
+                        id={COMPOSER_INPUT_ID}
+                        class="flex-1 min-w-0 bg-transparent border-0 outline-none px-2 py-2"
+                        placeholder={editingId
+                          ? "メッセージを編集…"
+                          : `#${channelName()} へメッセージを送信`}
+                        value={newMessage}
+                        mix={[
+                          on<HTMLInputElement>("input", (e) => {
+                            newMessage = (e.target as HTMLInputElement).value;
+                            handle.update();
+                          }),
+                          on("keydown", (e) => {
+                            // IME 変換確定の Enter（isComposing）では送信しない。
+                            if (e.key === "Enter" && !e.isComposing) {
+                              e.preventDefault();
+                              onPost();
+                            } else if (e.key === "Escape" && editingId) {
+                              e.preventDefault();
+                              cancelEdit();
+                            }
+                          }),
+                        ]}
+                      />
+                      {!editingId
+                        ? (
+                          <label
+                            class="btn btn-ghost btn-sm btn-circle"
+                            aria-label="画像を添付"
+                            title="画像を添付"
+                          >
+                            {/* 画像（山と太陽）アイコン */}
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              aria-hidden="true"
+                            >
+                              <rect
+                                x="3"
+                                y="3"
+                                width="18"
+                                height="18"
+                                rx="2"
+                              />
+                              <circle cx="9" cy="9" r="1.6" />
+                              <path d="M21 15l-4.5-4.5L7 20" />
+                            </svg>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              class="hidden"
+                              disabled={imageUploading}
+                              mix={[on<HTMLInputElement>("change", (e) => {
+                                const input = e.target as HTMLInputElement;
+                                const file = input.files?.[0];
+                                input.value = "";
+                                if (file) onAttachImage(file);
+                              })]}
+                            />
+                          </label>
+                        )
+                        : null}
+                      {!editingId
+                        ? (
+                          <button
+                            type="button"
+                            class={`btn btn-ghost btn-sm btn-circle ${
+                              stampPickerOpen ? "btn-active" : ""
+                            }`}
+                            aria-label="スタンプ"
+                            title="スタンプ"
+                            mix={[
+                              on("pointerdown", (e) => e.preventDefault()),
+                              on("click", toggleStampPicker),
+                            ]}
+                          >
+                            {/* 角がめくれたステッカー + 笑顔 */}
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3Z" />
+                              <path d="M15 3v3.5a2 2 0 0 0 2 2h3.5" />
+                              <path d="M8.5 13h.01" />
+                              <path d="M14.5 13h.01" />
+                              <path d="M9.5 16.2s1 1.1 2.5 1.1 2.5-1.1 2.5-1.1" />
+                            </svg>
+                          </button>
+                        )
+                        : null}
+                      <button
+                        type="button"
+                        class="btn btn-primary btn-sm btn-circle"
+                        aria-label={editingId ? "更新" : "送信"}
+                        title={editingId ? "更新" : "送信"}
+                        disabled={!newMessage.trim() &&
+                          !(pendingImage && !editingId)}
+                        mix={[
+                          // タップ/クリックで入力欄からフォーカスを奪わない
+                          // （スマホのキーボードが閉じないように）。click は
+                          // pointerdown を打ち消しても発火する。
+                          on("pointerdown", (e) => e.preventDefault()),
+                          on("click", onPost),
+                        ]}
                       >
-                        <path d="M3.4 20.4l17.4-7.5c.8-.35.8-1.45 0-1.8L3.4 3.6c-.66-.29-1.39.2-1.39.91l-.01 4.61c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z" />
-                      </svg>
-                    </button>
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M3.4 20.4l17.4-7.5c.8-.35.8-1.45 0-1.8L3.4 3.6c-.66-.29-1.39.2-1.39.91l-.01 4.61c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91z" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                ),
+            ]}
           </main>
 
           {sidebar()}

@@ -6,25 +6,36 @@
 
 import {
   canUseStamp,
+  createEvent,
   createThread,
+  deleteEvent,
+  getEvent,
   getMessageContext,
   getRole,
   getThread,
   HomeError,
+  listEvents,
   listHomesForUser,
   listHomeStamps,
   listLibrary,
   listMessages,
   listThreads,
+  normalizeEvent,
   pickupIntoThread,
   postMessage,
   renameThread,
   repostMessage,
   toggleReaction,
   touchStamp,
+  updateEvent,
 } from "@scope/db";
+import { announceEventChange } from "../calendar.ts";
 import { signalMainChannel, signalThread } from "../realtime.ts";
-import { checkPostLimit, checkRepostLimit } from "../rate_limit.ts";
+import {
+  checkCalendarWriteLimit,
+  checkPostLimit,
+  checkRepostLimit,
+} from "../rate_limit.ts";
 import { notifyNewMessage } from "../notify.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -68,6 +79,43 @@ async function homeIdOfThread(threadId: string): Promise<string> {
 const wrap = (error: unknown): never => {
   if (error instanceof HomeError) throw new ToolError(error.message);
   throw error;
+};
+
+/**
+ * Load an event by id and assert the agent is a member of *its* home, so an
+ * event id can never reach a home the agent is not in. Returns the event and
+ * the agent's role there.
+ */
+async function eventForAgent(eventId: string, agentId: string) {
+  const event = await getEvent(eventId);
+  if (!event) throw new ToolError("event not found");
+  const role = await requireMember(event.homeId, agentId);
+  return { event, role };
+}
+
+/**
+ * For `update_event`: a key present in `args` wins (a string sets it, `null`
+ * clears it); an absent key keeps the stored value. `optStr` cannot do this,
+ * since it folds both "absent" and "null" into "".
+ */
+const overlay = (
+  args: Record<string, unknown>,
+  key: string,
+  current: string | null,
+): string | null => {
+  if (!(key in args)) return current;
+  return typeof args[key] === "string" ? args[key] as string : null;
+};
+
+/** JSON Schema fragments shared by the event tools. */
+const DATE_SCHEMA = {
+  type: "string",
+  description: "Wall-clock date 'YYYY-MM-DD' (no timezone).",
+};
+const TIME_SCHEMA = {
+  type: ["string", "null"],
+  description: "Wall-clock time 'HH:MM'. Give both times, or neither for an " +
+    "all-day event.",
 };
 
 export const tools: McpTool[] = [
@@ -368,6 +416,155 @@ export const tools: McpTool[] = [
       if (ctx.threadId) await homeIdOfThread(ctx.threadId);
       try {
         return await toggleReaction(messageId, agentId, str(args, "emoji"));
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "list_events",
+    description: "List a home's calendar events overlapping a date range " +
+      "(inclusive). A multi-day event is included if any of its days fall in " +
+      "the range. All-day events have null startTime/endTime.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        homeId: { type: "string" },
+        from: DATE_SCHEMA,
+        to: DATE_SCHEMA,
+      },
+      required: ["homeId", "from", "to"],
+    },
+    async handler(agentId, args) {
+      const homeId = str(args, "homeId");
+      await requireMember(homeId, agentId);
+      try {
+        return await listEvents(homeId, {
+          from: str(args, "from"),
+          to: str(args, "to"),
+        });
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "create_event",
+    description: "Add an event to a home's calendar. Omit both times for an " +
+      "all-day event. The change is announced in the home's main channel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        homeId: { type: "string" },
+        title: { type: "string" },
+        startDate: DATE_SCHEMA,
+        startTime: TIME_SCHEMA,
+        endDate: {
+          ...DATE_SCHEMA,
+          type: ["string", "null"],
+          description: "Last day, 'YYYY-MM-DD'. Omit for a same-day event.",
+        },
+        endTime: TIME_SCHEMA,
+      },
+      required: ["homeId", "title", "startDate"],
+    },
+    async handler(agentId, args) {
+      const homeId = str(args, "homeId");
+      await requireMember(homeId, agentId);
+      const input = {
+        title: str(args, "title"),
+        startDate: str(args, "startDate"),
+        startTime: optStr(args, "startTime"),
+        endDate: optStr(args, "endDate"),
+        endTime: optStr(args, "endTime"),
+      };
+      try {
+        // Validate before the rate limit (see api/calendar.ts).
+        normalizeEvent(input);
+        if (!(await checkCalendarWriteLimit(agentId))) {
+          throw new ToolError("rate limited");
+        }
+        const event = await createEvent({ ...input, homeId, userId: agentId });
+        await announceEventChange("added", event, agentId);
+        return event;
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "update_event",
+    description: "Change a calendar event. Only the fields you pass change; " +
+      "pass null to clear one (null startTime and endTime make it all-day). " +
+      "Allowed for the event's creator or a home admin. The change is " +
+      "announced in the home's main channel.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        eventId: { type: "string" },
+        title: { type: "string" },
+        startDate: DATE_SCHEMA,
+        startTime: TIME_SCHEMA,
+        endDate: { ...DATE_SCHEMA, type: ["string", "null"] },
+        endTime: TIME_SCHEMA,
+      },
+      required: ["eventId"],
+    },
+    async handler(agentId, args) {
+      const { event, role } = await eventForAgent(
+        str(args, "eventId"),
+        agentId,
+      );
+      const input = {
+        title: overlay(args, "title", event.title) ?? "",
+        startDate: overlay(args, "startDate", event.startDate) ?? "",
+        startTime: overlay(args, "startTime", event.startTime),
+        endDate: overlay(args, "endDate", event.endDate),
+        endTime: overlay(args, "endTime", event.endTime),
+      };
+      try {
+        normalizeEvent(input); // before the rate limit, as in create_event
+        if (!(await checkCalendarWriteLimit(agentId))) {
+          throw new ToolError("rate limited");
+        }
+        const updated = await updateEvent({
+          ...input,
+          eventId: event.id,
+          userId: agentId,
+          isAdmin: role === "admin",
+        });
+        await announceEventChange("updated", updated, agentId);
+        return updated;
+      } catch (error) {
+        return wrap(error);
+      }
+    },
+  },
+  {
+    name: "delete_event",
+    description: "Delete a calendar event. Allowed for the event's creator " +
+      "or a home admin. The deletion is announced in the home's main channel.",
+    inputSchema: {
+      type: "object",
+      properties: { eventId: { type: "string" } },
+      required: ["eventId"],
+    },
+    async handler(agentId, args) {
+      const { event, role } = await eventForAgent(
+        str(args, "eventId"),
+        agentId,
+      );
+      if (!(await checkCalendarWriteLimit(agentId))) {
+        throw new ToolError("rate limited");
+      }
+      try {
+        const deleted = await deleteEvent({
+          eventId: event.id,
+          userId: agentId,
+          isAdmin: role === "admin",
+        });
+        await announceEventChange("deleted", deleted, agentId);
+        return { ok: true };
       } catch (error) {
         return wrap(error);
       }

@@ -41,6 +41,7 @@ import {
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
 import { routes } from "../../routes.ts";
+import { sseFromWatch } from "../../sse.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -120,51 +121,6 @@ function readImage(body: { image?: unknown }): ImageInput | undefined {
     height: typeof rec.height === "number" ? rec.height : undefined,
     expiresAt: typeof rec.expiresAt === "string" ? rec.expiresAt : undefined,
   };
-}
-
-/**
- * Wrap a KV watch stream as an SSE response. Emits a `ready` ping, then a
- * `sync` ping on every change; the client re-fetches the channel's messages.
- */
-function sseFromWatch(
-  request: Request,
-  watch: ReadableStream<unknown>,
-): Response {
-  const encoder = new TextEncoder();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const ping = (event: string) =>
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
-      ping("ready");
-
-      const reader = watch.getReader();
-      const stop = () => {
-        reader.cancel().catch(() => {});
-        try {
-          controller.close();
-        } catch { /* already closed */ }
-      };
-      request.signal.addEventListener("abort", stop);
-
-      (async () => {
-        try {
-          while (true) {
-            const { done } = await reader.read();
-            if (done) break;
-            ping("sync");
-          }
-        } catch { /* client gone */ }
-      })();
-    },
-  });
-
-  return new Response(body, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    },
-  });
 }
 
 export const threadsController = createController(routes.threadsApi, {
