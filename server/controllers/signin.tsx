@@ -12,8 +12,9 @@ import { createAction } from "@remix-run/fetch-router";
 import { SignInCard } from "../../client/signin_card.tsx";
 import { routes } from "../routes.ts";
 import { renderPage } from "../utils/render.tsx";
+import { IDP_ORIGIN } from "../config.ts";
 
-const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const idpOrigin = IDP_ORIGIN;
 
 export const signinAction = createAction(routes.signin, {
   handler(context) {

@@ -1,56 +1,55 @@
 /**
- * Per-user rate limiting over Deno KV (fixed-window counters).
+ * Per-user rate limiting over the shared KV table in D1 (fixed-window
+ * counters).
  *
  * Design limits: posts 1/sec and 20/min; reposts (pickup) are excluded from
- * the post limits but capped at 5/min. Each window is a bucket keyed by
- * `floor(now / windowMs)`; the counter expires after two windows so old
- * buckets clean themselves up. This is approximate (boundary effects) but
- * cheap and fans out across Deno Deploy isolates.
+ * the post limits but capped at 5/min. Each window is a row keyed by
+ * `floor(now / windowMs)`; it expires after two windows and the scheduled
+ * sweep deletes it. This is approximate (boundary effects) but cheap.
  */
 
-import { getKv } from "./kv.ts";
+import { type D1Like, encodeKey } from "@kuboon/kv/d1.ts";
+import { kvDb } from "./kv.ts";
 
 /**
  * Consume one unit against a fixed window. Returns false when over limit.
  *
- * Uses a compare-and-set loop so two concurrent requests can't both read the
- * same count and slip past the limit (a plain read-then-write would race, and
- * Deno Deploy runs many isolates against the same KV). On heavy contention it
- * fails closed.
+ * A single conditional upsert does the read-check-increment atomically on
+ * D1's primary, so concurrent requests can't both slip past the limit and a
+ * post costs one round trip per window. The row uses the `kv` table layout
+ * (JSON-encoded number) so it is swept like any other expiring entry.
  */
 export async function allow(
-  kv: Deno.Kv,
-  parts: Deno.KvKeyPart[],
+  db: D1Like,
+  parts: string[],
   limit: number,
   windowMs: number,
   now: number = Date.now(),
 ): Promise<boolean> {
   const bucket = Math.floor(now / windowMs);
-  const key = [...parts, bucket];
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const entry = await kv.get<number>(key);
-    const current = entry.value ?? 0;
-    if (current >= limit) return false;
-    const res = await kv.atomic()
-      .check(entry) // only commit if the bucket hasn't changed under us
-      .set(key, current + 1, { expireIn: windowMs * 2 })
-      .commit();
-    if (res.ok) return true;
-  }
-  return false; // too contended to safely admit — treat as limited
+  const row = await db
+    .prepare(
+      "INSERT INTO kv (key, value, version, expires_at) VALUES (?1, '1', 1, ?2) " +
+        "ON CONFLICT (key) DO UPDATE SET " +
+        "value = CAST(CAST(kv.value AS INTEGER) + 1 AS TEXT), " +
+        "version = kv.version + 1 " +
+        "WHERE CAST(kv.value AS INTEGER) < ?3 " +
+        "RETURNING value",
+    )
+    .bind(encodeKey([...parts, bucket]), now + windowMs * 2, limit)
+    .first<{ value: string }>();
+  return row !== null;
 }
 
 /** True if the user may post now (1/sec AND 20/min). */
 export async function checkPostLimit(userId: string): Promise<boolean> {
-  const kv = await getKv();
   // Check the per-second window first: a burst is rejected here without
   // draining the per-minute budget, which only ~1/sec posts should consume.
-  if (!(await allow(kv, ["rl", "post-sec", userId], 1, 1_000))) return false;
-  return await allow(kv, ["rl", "post-min", userId], 20, 60_000);
+  if (!(await allow(kvDb, ["rl", "post-sec", userId], 1, 1_000))) return false;
+  return await allow(kvDb, ["rl", "post-min", userId], 20, 60_000);
 }
 
 /** True if the user may repost now (5/min, separate from post limits). */
 export async function checkRepostLimit(userId: string): Promise<boolean> {
-  const kv = await getKv();
-  return await allow(kv, ["rl", "repost-min", userId], 5, 60_000);
+  return await allow(kvDb, ["rl", "repost-min", userId], 5, 60_000);
 }

@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
-import { resetClient } from "./client.ts";
+import { resetClient } from "./sqlite.ts";
 import { migrate } from "./migrate.ts";
 import { upsertUser } from "./users.ts";
 import { addMember, createHome } from "./homes.ts";
@@ -12,10 +12,6 @@ import {
   repostMessage,
   tombstoneMessage,
 } from "./threads.ts";
-
-if (!Deno.env.get("TURSO_DATABASE_URL")) {
-  Deno.env.set("TURSO_DATABASE_URL", ":memory:");
-}
 
 async function setup() {
   resetClient();

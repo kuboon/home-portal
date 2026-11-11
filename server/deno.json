@@ -2,16 +2,20 @@
   "tasks": {
     "check": "deno check; deno lint; deno test -P; deno fmt --check",
     "bundle": "deno task --cwd ../bundler build",
-    "dev": "deno task bundle && deno serve -P --watch ./router.ts",
-    "serve": "deno task bundle && deno serve -P ./router.ts"
+    "dev": "deno task bundle && deno serve -P --watch ./dev.ts",
+    "serve": "deno task bundle && deno serve -P ./dev.ts"
   },
   "compilerOptions": {
-    "lib": ["deno.ns", "deno.unstable", "dom"],
+    "lib": [
+      "deno.ns",
+      "deno.unstable",
+      "dom"
+    ],
     "jsx": "react-jsx",
     "jsxImportSource": "@remix-run/ui"
   },
   "imports": {
-    "@kuboon/kv": "jsr:@kuboon/kv@^0.2.0",
+    "@kuboon/kv": "jsr:@kuboon/kv@^0.4.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
     "jose": "jsr:@panva/jose@^6.2.10",
     "@remix-run/ui": "npm:@remix-run/ui@^0.8.0",
@@ -29,12 +33,17 @@
         "IDP_ORIGIN",
         "RP_ORIGIN",
         "STORAGE_ORIGIN",
-        "TURSO_DATABASE_URL",
-        "TURSO_AUTH_TOKEN",
-        "KV_DEFAULT_PATH"
+        "DEV_DB_PATH"
       ],
       "net": true,
-      "read": ["./bundled", "../packages/db/migrations"]
+      "read": [
+        "./bundled",
+        "../packages/db/migrations",
+        "../.local"
+      ],
+      "write": [
+        "../.local"
+      ]
     }
   }
 }

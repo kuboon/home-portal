@@ -4,21 +4,18 @@
  *
  * Thin wrapper over `@scope/remix-dpop-session-middleware` so controllers can
  * import a pre-configured middleware + re-export the context key from one
- * place. Sessions are persisted in a Deno KV store with a 1-hour TTL. (Turso
- * holds durable domain data; sessions are ephemeral and stay in Deno KV.)
+ * place. Sessions are persisted in the KV table (D1) with a 1-hour TTL.
  */
 
-import { DenoKvRepo } from "@kuboon/kv/denoKv.ts";
 import { dpopSession } from "@scope/remix-dpop-session-middleware";
 import { createKvSessionStorage } from "@scope/session-storage-kv";
 import type { Session } from "@remix-run/session";
+import { kvRepo } from "../kv.ts";
 
 export { DpopSession } from "@scope/remix-dpop-session-middleware";
 
 const sessionStorage = createKvSessionStorage(
-  new DenoKvRepo<Session["data"]>(["dpop-session"], {
-    expireIn: 3_600_000,
-  }),
+  kvRepo<Session["data"]>(["dpop-session"], { expireIn: 3_600_000 }),
 );
 
 export const dpop = dpopSession({ sessionStorage });

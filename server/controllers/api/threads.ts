@@ -122,47 +122,63 @@ function readImage(body: { image?: unknown }): ImageInput | undefined {
   };
 }
 
+/** SSE comment interval; keeps proxies from closing an idle stream. */
+const SSE_HEARTBEAT_MS = 25_000;
+
 /**
- * Wrap a KV watch stream as an SSE response. Emits a `ready` ping, then a
- * `sync` ping on every change; the client re-fetches the channel's messages.
+ * Wrap a realtime watch stream as an SSE response. Emits a `ready` ping, then
+ * a `sync` ping on every change; the client re-fetches the channel's
+ * messages. If the watch ends (e.g. the hub restarted on deploy) the response
+ * ends too, so the client reconnects and re-syncs.
  */
 function sseFromWatch(
   request: Request,
   watch: ReadableStream<unknown>,
 ): Response {
   const encoder = new TextEncoder();
+  const reader = watch.getReader();
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    if (heartbeat !== undefined) clearInterval(heartbeat);
+    heartbeat = undefined;
+    reader.cancel().catch(() => {});
+  };
+
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      const ping = (event: string) =>
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`));
-      ping("ready");
-
-      const reader = watch.getReader();
-      const stop = () => {
-        reader.cancel().catch(() => {});
+      const send = (text: string) => {
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch { /* already closed */ }
+      };
+      const close = () => {
+        stop();
         try {
           controller.close();
         } catch { /* already closed */ }
       };
-      request.signal.addEventListener("abort", stop);
+      send("event: ready\ndata: {}\n\n");
+      heartbeat = setInterval(() => send(": hb\n\n"), SSE_HEARTBEAT_MS);
+      request.signal.addEventListener("abort", close);
 
       (async () => {
         try {
           while (true) {
             const { done } = await reader.read();
             if (done) break;
-            ping("sync");
+            send("event: sync\ndata: {}\n\n");
           }
-        } catch { /* client gone */ }
+        } catch { /* hub or client gone */ }
+        close();
       })();
     },
+    cancel: stop,
   });
 
   return new Response(body, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
     },
   });
 }
@@ -375,7 +391,10 @@ export const threadsController = createController(routes.threadsApi, {
       if (!userId) return unauthorized();
       const { homeId } = context.params;
       if (!(await getRole(homeId, userId))) return forbidden();
-      return sseFromWatch(context.request, watchMainChannel(homeId));
+      return sseFromWatch(
+        context.request,
+        await watchMainChannel(homeId),
+      );
     },
 
     async messages(context) {
@@ -491,7 +510,7 @@ export const threadsController = createController(routes.threadsApi, {
         return Response.json({ error: "not found" }, { status: 404 });
       }
       if (!(await getRole(thread.homeId, userId))) return forbidden();
-      return sseFromWatch(context.request, watchThread(threadId));
+      return sseFromWatch(context.request, await watchThread(threadId));
     },
 
     async editMessage(context) {

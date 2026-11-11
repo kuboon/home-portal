@@ -6,3 +6,14 @@ server/bundled/
 
 # npm compat
 node_modules/
+
+# Local dev database (server/dev.ts)
+.local/
+
+# Cloudflare build output / tooling
+cloudflare/dist/
+cloudflare/node_modules/
+cloudflare/.cloudflare/
+
+# Data migration dumps (may contain user data)
+migration-data/

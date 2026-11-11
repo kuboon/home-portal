@@ -1,13 +1,22 @@
 /**
- * `@scope/db` — Turso (libSQL) data layer for home portal.
+ * `@scope/db` — Cloudflare D1 data layer for home portal.
  *
- * Re-exports the client accessor, the migration runner, and table modules.
+ * Re-exports the client accessor and table modules. The migration runner
+ * (`./migrate.ts`) and the `node:sqlite` stand-in (`./sqlite.ts`) are
+ * Deno-only and deliberately not re-exported, so the Worker bundle never
+ * pulls them in.
  *
  * @module
  */
 
-export { db } from "./client.ts";
-export { migrate } from "./migrate.ts";
+export {
+  d1Client,
+  type D1DatabaseLike,
+  db,
+  getD1,
+  setDatabase,
+  type SqlClient,
+} from "./client.ts";
 export {
   getUser,
   upsertUser,

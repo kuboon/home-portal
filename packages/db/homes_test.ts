@@ -3,7 +3,7 @@
  */
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
-import { resetClient } from "./client.ts";
+import { resetClient } from "./sqlite.ts";
 import { migrate } from "./migrate.ts";
 import { upsertUser } from "./users.ts";
 import {
@@ -17,10 +17,6 @@ import {
   setMemberName,
   setMemberRole,
 } from "./homes.ts";
-
-if (!Deno.env.get("TURSO_DATABASE_URL")) {
-  Deno.env.set("TURSO_DATABASE_URL", ":memory:");
-}
 
 async function freshDb() {
   resetClient();

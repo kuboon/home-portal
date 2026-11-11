@@ -15,8 +15,9 @@ import { JoinPanel } from "../../client/join_panel.tsx";
 import { routes } from "../routes.ts";
 import { resolveInvite } from "../invites.ts";
 import { renderBareDocument } from "../utils/render.tsx";
+import { IDP_ORIGIN } from "../config.ts";
 
-const idpOrigin = Deno.env.get("IDP_ORIGIN") ?? "https://id.kbn.one";
+const idpOrigin = IDP_ORIGIN;
 
 export const joinAction = createAction(routes.join, {
   async handler(context) {
