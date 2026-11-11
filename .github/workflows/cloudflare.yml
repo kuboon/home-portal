@@ -15,7 +15,7 @@ name: cloudflare
 #
 # Secrets: CLOUDFLARE_API_TOKEN; for import-data also TURSO_AUTH_TOKEN and,
 # optionally, DENO_KV_URL + DENO_KV_ACCESS_TOKEN.
-# Variables: CLOUDFLARE_ACCOUNT_ID; HOME_PORTAL_DOMAIN (set before cutover);
+# Variables: HOME_PORTAL_DOMAIN (set before cutover);
 # TURSO_DATABASE_URL (optional override); CLOUDFLARE_AUTO_DEPLOY.
 
 on:
@@ -44,7 +44,8 @@ jobs:
     env:
       STEP: ${{ inputs.step || 'deploy' }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      # The kuboon account (fixed).
+      CLOUDFLARE_ACCOUNT_ID: ac92f36f0a2d84353b137574157f7480
     steps:
       - uses: actions/checkout@v7
       - uses: denoland/setup-deno@v2
@@ -62,7 +63,6 @@ jobs:
         run: |
           fail() { echo "::error::$1"; exit 1; }
           [ -n "$CLOUDFLARE_API_TOKEN" ] || fail "secret CLOUDFLARE_API_TOKEN is not set"
-          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || fail "variable CLOUDFLARE_ACCOUNT_ID is not set"
           case "$STEP" in
             setup)
               # A deploy without the domain could detach it after cutover.
