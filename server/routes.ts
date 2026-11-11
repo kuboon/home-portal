@@ -1,4 +1,10 @@
-import { del, get, post, route } from "@remix-run/fetch-router/routes";
+import {
+  createResourcesRoutes,
+  del,
+  get,
+  post,
+  route,
+} from "@remix-run/fetch-router/routes";
 
 export const routes = route({
   home: get("/"),
@@ -9,6 +15,8 @@ export const routes = route({
   homeChat: get("/home/:homeId"),
   /** Chat for a specific thread in a home. */
   homeThread: get("/home/:homeId/thread/:threadId"),
+  /** The home's shared calendar (a pane of the chat screen). */
+  homeCalendar: get("/home/:homeId/calendar"),
   /** Per-home PWA manifest so an A2HS icon is named after the home. */
   homeManifest: get("/home/:homeId/manifest.webmanifest"),
   /** Public invite landing page: sign up (if needed) and join the home. */
@@ -121,4 +129,25 @@ export const routes = route({
     /** DELETE /api/messages/:messageId — delete a message (author or admin). */
     deleteMessage: del("/messages/:messageId"),
   }),
+  /**
+   * A home's calendar events, via `createResourcesRoutes` (members):
+   *
+   * - `index`   GET    /api/homes/:homeId/events?from=&to= — events in a range
+   * - `show`    GET    /api/homes/:homeId/events/:eventId
+   * - `create`  POST   /api/homes/:homeId/events
+   * - `update`  PUT    /api/homes/:homeId/events/:eventId — creator or admin
+   * - `destroy` DELETE /api/homes/:homeId/events/:eventId — creator or admin
+   *
+   * Spread at the top level, not inside `route("api", …)`: the generated
+   * routes already carry absolute patterns, and a group would prefix `api`
+   * a second time.
+   */
+  calendarApi: {
+    ...createResourcesRoutes("api/homes/:homeId/events", {
+      param: "eventId",
+      exclude: ["new", "edit"], // HTML form pages; this is a JSON API
+    }),
+    /** GET /api/homes/:homeId/events/stream — SSE change pings (members). */
+    stream: get("api/homes/:homeId/events/stream"),
+  },
 });

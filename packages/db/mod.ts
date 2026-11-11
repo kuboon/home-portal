@@ -106,3 +106,16 @@ export {
   getAgentOwner,
   listAgentsByOwner,
 } from "./agents.ts";
+export {
+  type CalendarEvent,
+  createEvent,
+  deleteEvent,
+  type EventFields,
+  type EventInput,
+  getEvent,
+  listEvents,
+  MAX_EVENT_RANGE_DAYS,
+  MAX_EVENT_TITLE,
+  normalizeEvent,
+  updateEvent,
+} from "./calendar.ts";

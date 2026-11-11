@@ -33,7 +33,7 @@ client / server を分離した Deno workspaces。
   （テスト・ローカル用の `node:sqlite` 版 D1。Worker から import しない）/
   `migrate.ts`（テスト・ローカル用。本番は `cf d1 migrations apply`）/
   `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）/
-  `threads.ts`（Thread・Message）。
+  `threads.ts`（Thread・Message）/ `calendar.ts`（カレンダーの予定）。
 - `scripts/` — Turso / Deno KV → D1 のデータ移行（`export_data.ts` /
   `import_d1.ts`）と D1 REST クライアント（`cloudflare_api.ts`）。GitHub Actions
   の `cloudflare` workflow（`setup` / `import-data` / `cutover` / `deploy`）から
@@ -55,8 +55,9 @@ client / server を分離した Deno workspaces。
   compare-and-set が要るので Workers KV は使わない。D1 に TTL は無いので期限
   切れ行は毎時の cron（`scheduled`）で掃除する。
 - リアルタイム配信は **SSE + Durable Objects**（`server/realtime.ts` /
-  `realtime_do.ts`。チャンネルごとに `ChannelHub` が watch ストリームへ変更
-  シグナルを配る）。メッセージは D1 が真実の源で、DO は変更シグナルのみ。
+  `realtime_do.ts`。チャンネル（スレッド・メイン・ホームのカレンダー）ごとに
+  `ChannelHub` が watch ストリームへ変更シグナルを配る）。メッセージは D1
+  が真実の源で、DO は変更シグナルのみ。
 
 ## 環境変数
 
@@ -125,3 +126,9 @@ LRU・ホーム共有・使用時自動追加、 picker/設定 UI、MCP
 UI・タイムライン描画・repost サムネイル。画像付き post は編集不可。**7
 日で自動削除**＝`?expireDays=7` で storage の `expire-at` を記録し 日次 cron
 が削除、UI に「M/D に削除されます」表示）まで実装済み。設計の全スコープを一巡。
+その後の追加: **カレンダー**（ホームごとの共有カレンダー。終日/時刻つき・
+複数日の予定、追加はメンバー・変更削除は作成者か admin、変更ごとにメイン
+チャンネルへ告知 post。日付は TZ を持たない文字列。チャット画面のペインとして
+`/home/:homeId/calendar`、API は `createResourcesRoutes` で
+`/api/homes/:homeId/events`、SSE はホーム単位。MCP
+`list_events`/`create_event`/`update_event`/`delete_event`）。

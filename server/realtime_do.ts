@@ -1,6 +1,7 @@
 /**
  * Realtime fan-out on Cloudflare: one Durable Object ({@link ChannelHub}) per
- * channel, addressed by name (`thread:<id>` / `main:<homeId>`).
+ * channel, addressed by name (`thread:<id>` / `main:<homeId>` /
+ * `calendar:<homeId>`).
  *
  * A watcher (the SSE handler in some Worker isolate) holds a streaming
  * `GET /watch` open against the channel's object; a poster sends
