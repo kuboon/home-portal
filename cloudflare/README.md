@@ -44,14 +44,17 @@ Settings → Secrets and variables → Actions:
 | secret | `DENO_KV_URL`          | （任意）Deno Deploy の KV 画面の接続 URL（`https://api.deno.com/databases/<id>/connect`）           |
 | secret | `DENO_KV_ACCESS_TOKEN` | （任意）Deno Deploy のアクセストークン                                                              |
 
-- Cloudflare API トークン（My Profile → API Tokens → Create Token）:
-  テンプレート **Edit Cloudflare Workers** を選び、次を追加する。
+- Cloudflare API トークン（ユーザー所有でもアカウント所有でもよい）に必要な権限:
+  - Account: **Workers Scripts: Edit**（必須。新しい「Workers Editor」系の
+    権限だけでは、デプロイ時の静的ファイルのアップロード
+    `POST …/workers/scripts/home-portal/assets-upload-session` が
+    `403 No access to the specified resource` になる）
   - Account: **D1: Edit**
-  - Zone `kbn.one`: **DNS: Edit**（カスタムドメインの DNS レコードと証明書を
-    Worker が作るため。テンプレートの Workers Routes: Edit と合わせて使う）
+  - Zone `kbn.one`: **Workers Routes: Edit**, **DNS: Edit**（カスタムドメインの
+    DNS レコードと証明書を Worker が作るため）
   - Account Resources / Zone Resources は kuboon アカウントと `kbn.one` に絞る
-  - Workers Scripts: Edit だけだと静的ファイルのアップロードなどで
-    `403 No access to the specified resource` になる
+  - workflow の「Check Cloudflare API token」ステップが、デプロイ前に各 API
+    （上の書き込み API を含む）へ届くかをサマリの表に出す
 - Turso の URL は既定で
   `libsql://home-portal-ohio-kuboon.aws-us-east-2.turso.io`。 違う場合は
   variable `TURSO_DATABASE_URL` で上書きする。
