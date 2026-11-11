@@ -37,13 +37,12 @@ Deno でビルドし、このディレクトリの `cf` CLI（npm）でデプロ
 
 Settings → Secrets and variables → Actions:
 
-| 種類     | 名前                    | 値                                                                                                  |
-| -------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
-| secret   | `CLOUDFLARE_API_TOKEN`  | 下記の権限を持つ API トークン                                                                       |
-| variable | `CLOUDFLARE_ACCOUNT_ID` | kuboon アカウントの ID（ダッシュボードの Workers & Pages 右側、または URL の `/<id>/`）             |
-| secret   | `TURSO_AUTH_TOKEN`      | Turso ダッシュボード → `home-portal-ohio` → Create Token（Read Only でよい・期限は 1 日程度でよい） |
-| secret   | `DENO_KV_URL`           | （任意）Deno Deploy の KV 画面の接続 URL（`https://api.deno.com/databases/<id>/connect`）           |
-| secret   | `DENO_KV_ACCESS_TOKEN`  | （任意）Deno Deploy のアクセストークン                                                              |
+| 種類   | 名前                   | 値                                                                                                  |
+| ------ | ---------------------- | --------------------------------------------------------------------------------------------------- |
+| secret | `CLOUDFLARE_API_TOKEN` | 下記の権限を持つ API トークン                                                                       |
+| secret | `TURSO_AUTH_TOKEN`     | Turso ダッシュボード → `home-portal-ohio` → Create Token（Read Only でよい・期限は 1 日程度でよい） |
+| secret | `DENO_KV_URL`          | （任意）Deno Deploy の KV 画面の接続 URL（`https://api.deno.com/databases/<id>/connect`）           |
+| secret | `DENO_KV_ACCESS_TOKEN` | （任意）Deno Deploy のアクセストークン                                                              |
 
 - Cloudflare API トークン（My Profile → API Tokens → Create Custom Token）:
   - Account: **Workers Scripts: Edit**, **D1: Edit**
@@ -131,7 +130,8 @@ variable `CLOUDFLARE_AUTO_DEPLOY` = `true`。以後 main への push で、ビ�
 ## ローカルから操作する場合（任意）
 
 workflow と同じことを手元でもできる（`cd cloudflare && npm ci`、
-`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` を環境変数に設定）:
+`CLOUDFLARE_API_TOKEN` と
+`CLOUDFLARE_ACCOUNT_ID=ac92f36f0a2d84353b137574157f7480` を環境変数に設定）:
 
 ```bash
 deno run -A scripts/cloudflare_api.ts ensure   # D1 を作成/検索して ID を表示
