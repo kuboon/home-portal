@@ -12,6 +12,9 @@ const API = Deno.env.get("CLOUDFLARE_API_BASE") ??
 
 export const D1_NAME = "home-portal";
 
+/** The Worker's name (`cloudflare/cloudflare.config.ts`). */
+export const WORKER_NAME = "home-portal";
+
 interface Envelope<T> {
   success: boolean;
   errors?: { code: number; message: string }[];
@@ -107,14 +110,34 @@ export async function checkToken(): Promise<{ ok: boolean; lines: string[] }> {
     ],
     ["D1", `/accounts/${account}/d1/database`],
   ];
+  // The one write `cf deploy` failed on (403): opening an asset upload
+  // session. With an empty manifest nothing is uploaded or created; any
+  // answer other than 401/403 means the token may write Workers scripts.
+  const writeProbe: [string, string, RequestInit] = [
+    "Workers Scripts (write: asset upload session)",
+    `/accounts/${account}/workers/scripts/${WORKER_NAME}/assets-upload-session`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest: {} }),
+    },
+  ];
   const lines = ["| API | status | |", "| --- | --- | --- |"];
   const results: Record<string, boolean> = {};
-  for (const [label, path] of probes) {
+  for (
+    const [label, path, init] of [
+      ...probes.map(([l, p]) => [l, p, {}] as [string, string, RequestInit]),
+      writeProbe,
+    ]
+  ) {
     const res = await fetch(`${API}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
+      ...init,
+      headers: { ...init.headers, authorization: `Bearer ${token}` },
     });
     const data = await res.json().catch(() => ({})) as Envelope<unknown>;
-    const ok = res.ok && data.success !== false;
+    const ok = init.method === "POST"
+      ? res.status !== 401 && res.status !== 403
+      : res.ok && data.success !== false;
     results[label] = ok;
     const error = (data.errors ?? []).map((e) => `${e.code} ${e.message}`)
       .join("; ");
