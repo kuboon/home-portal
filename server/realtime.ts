@@ -34,3 +34,15 @@ export async function signalMainChannel(homeId: string): Promise<void> {
 export function watchMainChannel(homeId: string): ReadableStream<unknown> {
   return kv.watch([mainSignalKey(homeId)]);
 }
+
+const calendarSignalKey = (homeId: string) => ["calendar-signal", homeId];
+
+/** Bump a home's calendar signal (an event was added, changed or removed). */
+export async function signalCalendar(homeId: string): Promise<void> {
+  await kv.set(calendarSignalKey(homeId), Date.now());
+}
+
+/** A stream that yields once per change to a home's calendar signal. */
+export function watchCalendar(homeId: string): ReadableStream<unknown> {
+  return kv.watch([calendarSignalKey(homeId)]);
+}

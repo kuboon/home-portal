@@ -482,6 +482,50 @@ repost の原本がどう消されたかで挙動が分かれる。
 
 ---
 
+## カレンダー
+
+ホームごとに **1 つの共有カレンダー**。家族の「いつ」(運動会・通院・旅行) を、
+流れていくチャットとは別に置いておく場所。
+
+- **予定**: タイトル + **終日** または
+  **開始・終了の時刻つき**。複数日にまたがれる
+- **権限**: メンバーなら誰でも追加。変更・削除は**作成者か管理者**
+- **チャット連携**: 追加・変更・削除のたびに、操作した本人の名前で
+  **メインチャンネル**へ `📅 予定を追加: 11/8(日) 10:00〜11:30 運動会`
+  形式の一行が流れる。既存の realtime と Web Push にそのまま乗る
+- **UI**: チャット画面のペインとして表示 (サイドバーの「メイン」の隣)。 月表示
+  (日曜始まり 6×7) + 選択日 or その月の予定一覧 + 追加・編集シート。 URL は
+  `/home/:homeId/calendar` (PWA スコープの内側)
+- **MCP**: `list_events` / `create_event` / `update_event` / `delete_event`
+
+### 日付の扱い
+
+日付・時刻は**タイムゾーンを持たない壁掛け時計の文字列** (`'YYYY-MM-DD'` /
+`'HH:MM'`) で保存する。家族の予定は「11/8 の 10 時」であって絶対時刻ではない
+ため。グリッドのセルは文字列そのもので決まり、換算はどこにも入らない。曜日の
+算出だけは `Date.UTC` + `getUTCDay()` で行う (`new Date("2026-11-08")` は UTC
+深夜なので、`getDay()` だと UTC より西の閲覧者で前日にずれる)。「今日」だけは
+閲覧者の端末の今日。
+
+### あえて入れていないもの
+
+- 繰り返し (RRULE)・参加可否 (出欠)・メモ欄
+- リマインダ通知。このリポジトリには cron が無い (画像期限切れの cron は
+  storage.kbn.one 側) ので、足すなら新しい仕組みが要る
+- 予定の論理削除・変更履歴 (物理削除)。チャットへの自動投稿は投稿者が消せる
+  普通の post なので、監査ログの代わりにはならない
+- 既知の割り切り: 自動投稿の push はメインチャンネルと同じバックオフ鍵を共有
+  するので、直前にチャットがあると抑制される。通知のリンク先もチャット
+
+> ✅ **実装済み**: `events` テーブル (`0015_calendar.sql`、終日/時刻ありの
+> 不変条件は CHECK でも保証)、`packages/db/calendar.ts`。API は fetch-router の
+> `createResourcesRoutes` で `/api/homes/:homeId/events` に index / show /
+> create / update (PUT) / destroy を生成し、SSE (`/events/stream`、ホーム単位の
+> KV シグナル) を足している。パスに `homeId` を含むので、変更系はイベント自身の
+> `homeId` とパスを突き合わせ、 不一致は 404 (他ホームのイベントに届かない)。
+
+---
+
 ## AI エージェント統合
 
 - 各ユーザが手元の Claude
@@ -499,6 +543,7 @@ repost の原本がどう消されたかで挙動が分かれる。
   - リアクションの付与 / 削除
   - スタンプの登録 / 送信 / ライブラリ管理
   - 画像投稿
+  - カレンダー予定の一覧 / 追加 / 変更 / 削除
   - メンバー一覧・プロフィール閲覧
   - (管理者) テーマ CSS 設定、招待、モデレーション操作
 - **エージェントも人間と同じルールに従う**:
@@ -556,6 +601,14 @@ repost の原本がどう消されたかで挙動が分かれる。
 - **pickup によって生成される repost のみ枠外**
 - **単発の repost (引用投稿) は通常 post 枠でカウント**
 - pickup アクション自体の上限は暫定 **1 分 5 pickup**
+
+### カレンダー枠 (post 枠とは別)
+
+- 予定の追加・変更・削除で **1 秒あたり 1 回、1 分あたり 20 回**
+- 変更のたびにメインチャンネルへ告知 post が出るが、その post は post 枠を
+  消費しない。代わりにこの枠で post 枠と同じ 1 秒の下限を守る
+- **検証エラーで弾かれた操作は枠を消費しない** (何も post しないため)。
+  消費すると、エラーを見てすぐ直した保存が「速すぎます」で弾かれる
 
 ---
 
@@ -654,6 +707,7 @@ repost の原本がどう消されたかで挙動が分かれる。
 | ThreadParticipant | thread_id, user_id, state (`joined` / `left`)                                                                                            | スレッド参加者の正の状態源。`joined` の集合が通知対象                                                                                            |
 | Reaction          | post_id, user_id, emoji                                                                                                                  | 同一 post × 同一 user で最大 5 件                                                                                                                |
 | Stamp             | owner_user_id, image, last_used_at                                                                                                       | LRU のため `last_used_at` を保持                                                                                                                 |
+| Event             | id, home_id, title, start_date, start_time?, end_date?, end_time?, created_by, created_at, edited_at?                                    | カレンダーの予定。日付・時刻は TZ を持たない文字列。`start_time` NULL が終日。物理削除                                                           |
 | StampUse          | post_id, stamp_id, user_id                                                                                                               | 使用時にライブラリ追加のトリガ                                                                                                                   |
 | ApprovalRequest   | id, home_id, requester_user_id, action_type, action_payload, state (`pending` / `approved` / `rejected`), approver_user_id?, decided_at? | 管理権限を要する操作の request → approve フロー                                                                                                  |
 | InviteToken       | id, home_id, issued_by_user_id, token, last_heartbeat_at                                                                                 | 招待画面の heartbeat で延命。最終 heartbeat から 60 秒で無効。回数制限なし                                                                       |

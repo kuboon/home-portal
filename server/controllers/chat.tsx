@@ -1,8 +1,10 @@
 /**
- * GET /home/:homeId and /home/:homeId/thread/:threadId — the chat view.
+ * GET /home/:homeId, /home/:homeId/thread/:threadId and /home/:homeId/calendar
+ * — the chat view.
  *
  * Hosts the `ChatPanel` clientEntry (sidebar of threads + a conversation pane)
- * for one home. The home and thread ids come from the URL; everything else is
+ * for one home. The home and thread ids come from the URL, as does which pane
+ * to open (the conversation, or the calendar); everything else is
  * loaded client-side over the DPoP-protected `/api` endpoints. Rendered as a
  * shell+frame on direct access and as a fragment in the content frame.
  *
@@ -23,7 +25,11 @@ const storageOrigin = Deno.env.get("STORAGE_ORIGIN") ??
   "https://storage.kbn.one";
 const DEFAULT_TITLE = "home portal (ホムポタ)";
 
-async function chatPage(homeId: string, threadId: string): Promise<Response> {
+async function chatPage(
+  homeId: string,
+  threadId: string,
+  view: "chat" | "calendar" = "chat",
+): Promise<Response> {
   const home = await getHome(homeId);
   const title = home?.name ?? DEFAULT_TITLE;
   return renderBareDocument(
@@ -33,6 +39,7 @@ async function chatPage(homeId: string, threadId: string): Promise<Response> {
       storageOrigin={storageOrigin}
       homeId={homeId}
       threadId={threadId}
+      view={view}
     />,
     <link
       rel="manifest"
@@ -51,6 +58,12 @@ export const homeThreadAction = createAction(routes.homeThread, {
   handler(context) {
     const { homeId, threadId } = context.params;
     return chatPage(homeId, threadId);
+  },
+});
+
+export const homeCalendarAction = createAction(routes.homeCalendar, {
+  handler(context) {
+    return chatPage(context.params.homeId, "", "calendar");
   },
 });
 

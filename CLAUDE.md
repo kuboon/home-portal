@@ -20,7 +20,7 @@ client / server を分離した Deno workspaces。
   に、Tailwind/daisyUI を `server/bundled/style.css` にビルド。
 - `packages/db/` — Turso (libSQL) データ層。`client.ts` / `migrate.ts` /
   `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）/ `threads.ts`
-  （Thread・Message）。
+  （Thread・Message）/ `calendar.ts`（カレンダーの予定）。
 - `packages/session-storage-kv/` — `@remix-run/session` の `SessionStorage` を
   `KvRepo` で実装（reference から取り込み）。
 - `packages/remix-dpop-session-middleware/` — DPoP セッション
@@ -36,7 +36,7 @@ client / server を分離した Deno workspaces。
 - セッション = **Deno KV**（`@kuboon/kv` +
   `session-storage-kv`）。リアルタイム配信は **SSE + Deno KV
   watch**（`server/realtime.ts`）。メッセージは Turso が真実の源で、 KV
-  はスレッド単位の変更シグナルにのみ使う。
+  はスレッド単位（カレンダーはホーム単位）の変更シグナルにのみ使う。
 
 ## 環境変数
 
@@ -102,3 +102,9 @@ LRU・ホーム共有・使用時自動追加、 picker/設定 UI、MCP
 UI・タイムライン描画・repost サムネイル。画像付き post は編集不可。**7
 日で自動削除**＝`?expireDays=7` で storage の `expire-at` を記録し 日次 cron
 が削除、UI に「M/D に削除されます」表示）まで実装済み。設計の全スコープを一巡。
+その後の追加: **カレンダー**（ホームごとの共有カレンダー。終日/時刻つき・
+複数日の予定、追加はメンバー・変更削除は作成者か admin、変更ごとにメイン
+チャンネルへ告知 post。日付は TZ を持たない文字列。チャット画面のペインとして
+`/home/:homeId/calendar`、API は `createResourcesRoutes` で
+`/api/homes/:homeId/events`、SSE はホーム単位。MCP
+`list_events`/`create_event`/`update_event`/`delete_event`）。
