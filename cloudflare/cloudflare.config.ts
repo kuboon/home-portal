@@ -28,8 +28,9 @@ export default defineConfig({
     // (server/config.ts reads them there).
     compatibilityFlags: ["nodejs_compat"],
     entrypoint: "./dist/worker.js",
-    // Most requests make several D1 round trips: run next to the database.
-    placement: { mode: "smart" },
+    // Run in Tokyo, next to the users and the D1 primary (created with the
+    // `apac` location hint): most requests make several D1 round trips.
+    placement: { region: "aws:ap-northeast-1" },
     observability: { enabled: true },
     domains: domain ? [domain] : undefined,
     // Hourly: sweep expired KV rows (D1 has no TTL).
