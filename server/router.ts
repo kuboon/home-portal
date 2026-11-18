@@ -12,6 +12,7 @@
 import { createRouter, type Middleware } from "@remix-run/fetch-router";
 
 import { agentsController } from "./controllers/api/agents.ts";
+import { calendarController } from "./controllers/api/calendar.ts";
 import { apiController } from "./controllers/api/controller.ts";
 import { homesController } from "./controllers/api/homes.ts";
 import { invitesController } from "./controllers/api/invites.ts";
@@ -19,6 +20,7 @@ import { stampsController } from "./controllers/api/stamps.ts";
 import { threadsController } from "./controllers/api/threads.ts";
 import { agentsAction } from "./controllers/agents.tsx";
 import {
+  homeCalendarAction,
   homeChatAction,
   homeManifestAction,
   homeThreadAction,
@@ -82,6 +84,7 @@ export function createAppRouter(extra: Middleware[] = []) {
   router.get(routes.homes, homesAction);
   router.get(routes.homeChat, homeChatAction);
   router.get(routes.homeThread, homeThreadAction);
+  router.get(routes.homeCalendar, homeCalendarAction);
   router.get(routes.homeManifest, homeManifestAction);
   router.get(routes.join, joinAction);
   router.get(routes.agents, agentsAction);
@@ -92,6 +95,7 @@ export function createAppRouter(extra: Middleware[] = []) {
   router.post(routes.mcp, mcpAction);
   router.map(routes.api, apiController);
   router.map(routes.agentsApi, agentsController);
+  router.map(routes.calendarApi, calendarController);
   router.map(routes.homesApi, homesController);
   router.map(routes.invitesApi, invitesController);
   router.map(routes.stampsApi, stampsController);

@@ -41,6 +41,7 @@ import {
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
 import { routes } from "../../routes.ts";
+import { sseFromWatch } from "../../sse.ts";
 
 function currentUserId(session: DpopSession): string | null {
   const value = session.get("userId");
@@ -120,67 +121,6 @@ function readImage(body: { image?: unknown }): ImageInput | undefined {
     height: typeof rec.height === "number" ? rec.height : undefined,
     expiresAt: typeof rec.expiresAt === "string" ? rec.expiresAt : undefined,
   };
-}
-
-/** SSE comment interval; keeps proxies from closing an idle stream. */
-const SSE_HEARTBEAT_MS = 25_000;
-
-/**
- * Wrap a realtime watch stream as an SSE response. Emits a `ready` ping, then
- * a `sync` ping on every change; the client re-fetches the channel's
- * messages. If the watch ends (e.g. the hub restarted on deploy) the response
- * ends too, so the client reconnects and re-syncs.
- */
-function sseFromWatch(
-  request: Request,
-  watch: ReadableStream<unknown>,
-): Response {
-  const encoder = new TextEncoder();
-  const reader = watch.getReader();
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stop = () => {
-    if (heartbeat !== undefined) clearInterval(heartbeat);
-    heartbeat = undefined;
-    reader.cancel().catch(() => {});
-  };
-
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const send = (text: string) => {
-        try {
-          controller.enqueue(encoder.encode(text));
-        } catch { /* already closed */ }
-      };
-      const close = () => {
-        stop();
-        try {
-          controller.close();
-        } catch { /* already closed */ }
-      };
-      send("event: ready\ndata: {}\n\n");
-      heartbeat = setInterval(() => send(": hb\n\n"), SSE_HEARTBEAT_MS);
-      request.signal.addEventListener("abort", close);
-
-      (async () => {
-        try {
-          while (true) {
-            const { done } = await reader.read();
-            if (done) break;
-            send("event: sync\ndata: {}\n\n");
-          }
-        } catch { /* hub or client gone */ }
-        close();
-      })();
-    },
-    cancel: stop,
-  });
-
-  return new Response(body, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-    },
-  });
 }
 
 export const threadsController = createController(routes.threadsApi, {

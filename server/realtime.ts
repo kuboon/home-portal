@@ -12,8 +12,11 @@
  *   fans out across isolates and data centres.
  */
 
-/** A channel name: a thread, or a home's main channel. */
-export type Channel = `thread:${string}` | `main:${string}`;
+/** A channel name: a thread, a home's main channel, or a home's calendar. */
+export type Channel =
+  | `thread:${string}`
+  | `main:${string}`
+  | `calendar:${string}`;
 
 export interface RealtimeHub {
   /** Wake every watcher of `channel`. */
@@ -84,4 +87,16 @@ export function watchMainChannel(
   homeId: string,
 ): Promise<ReadableStream<unknown>> {
   return hub.watch(`main:${homeId}`);
+}
+
+/** Bump a home's calendar signal (an event was added, changed or removed). */
+export async function signalCalendar(homeId: string): Promise<void> {
+  await hub.signal(`calendar:${homeId}`);
+}
+
+/** A stream that yields once per change to a home's calendar. */
+export function watchCalendar(
+  homeId: string,
+): Promise<ReadableStream<unknown>> {
+  return hub.watch(`calendar:${homeId}`);
 }
