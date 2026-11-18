@@ -37,6 +37,10 @@ export default defineConfig({
     // (it was switched off in the dashboard, and `cf deploy` in CI aborts when
     // the local config disagrees with the remote one).
     workersDev: !domain,
+    // Version preview URLs stay on, as set in the dashboard. Left unset, `cf`
+    // derives `false` from `workersDev: false`, which `cf deploy` counts as a
+    // conflicting change and aborts.
+    previewUrls: true,
     // Hourly: sweep expired KV rows (D1 has no TTL).
     triggers: [triggers.scheduled({ schedule: "17 * * * *" })],
     exports: {
