@@ -43,7 +43,14 @@ export default defineConfig({
       ChannelHub: exports.durableObject({ storage: "sqlite" }),
     },
     env: {
-      DB: bindings.d1({ name: "home-portal" }),
+      // The id pins the existing database (created by the workflow's `setup`).
+      // Without it, `cf deploy` reads the binding as dropping the remote
+      // `database_id` and aborts when the Worker was last changed in the
+      // dashboard.
+      DB: bindings.d1({
+        name: "home-portal",
+        id: "c678afa4-f8ac-4e15-8607-9f432f3648bd",
+      }),
       CHANNEL_HUB: bindings.durableObject({
         worker: WORKER_NAME,
         exportName: "ChannelHub",

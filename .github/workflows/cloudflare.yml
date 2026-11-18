@@ -44,6 +44,10 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       # The kuboon account (fixed).
       CLOUDFLARE_ACCOUNT_ID: ac92f36f0a2d84353b137574157f7480
+      # Read by cloudflare.config.ts: attaches the custom domain and turns
+      # workers.dev off. Job-wide because `cf build` (in the Build step)
+      # writes the config that `cf deploy --prebuilt` uploads.
+      HOME_PORTAL_DOMAIN: ${{ (inputs.step || 'deploy') != 'setup' && vars.HOME_PORTAL_DOMAIN || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: denoland/setup-deno@v2
@@ -120,9 +124,6 @@ jobs:
       - name: Deploy
         if: env.STEP != 'import-data'
         working-directory: cloudflare
-        env:
-          # Read by cloudflare.config.ts: attaches the custom domain.
-          HOME_PORTAL_DOMAIN: ${{ env.STEP != 'setup' && vars.HOME_PORTAL_DOMAIN || '' }}
         run: |
           # pipefail: without it the step takes tee's exit status, so a
           # failed deploy would show as green.
