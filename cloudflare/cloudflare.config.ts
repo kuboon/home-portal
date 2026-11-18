@@ -33,6 +33,10 @@ export default defineConfig({
     placement: { region: "aws:ap-northeast-1" },
     observability: { enabled: true },
     domains: domain ? [domain] : undefined,
+    // workers.dev only until cutover; once on the custom domain it stays off
+    // (it was switched off in the dashboard, and `cf deploy` in CI aborts when
+    // the local config disagrees with the remote one).
+    workersDev: !domain,
     // Hourly: sweep expired KV rows (D1 has no TTL).
     triggers: [triggers.scheduled({ schedule: "17 * * * *" })],
     exports: {
