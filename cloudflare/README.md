@@ -65,8 +65,8 @@ Deno Deploy は旧設定（`deno task pre-deploy` で Turso にマイグレー�
 エントリ `server/router.ts`）でビルドするので、連携したままマージすると本番の
 ビルドが失敗する。連携を外しても、動いている本番はそのまま動き続ける。
 
-マージしても Cloudflare には何も起きない（push での自動デプロイは
-`CLOUDFLARE_AUTO_DEPLOY` を設定するまで無効）。
+マージすると main への push で `deploy` が走るが、`HOME_PORTAL_DOMAIN` が
+未設定なので「Check configuration」で止まり、Cloudflare には何も起きない。
 
 ### 3. `step: setup` を実行する
 
@@ -112,11 +112,12 @@ Deploy に流れている。
 - テスト通知と、別ユーザーの投稿による push 通知
 - MCP（`POST /mcp/<agentId>`）
 
-### 8. 自動デプロイを有効にする
+### 8. 以後のデプロイ
 
-variable `CLOUDFLARE_AUTO_DEPLOY` = `true`。以後 main への push で、ビルド → D1
-マイグレーション → デプロイ（`HOME_PORTAL_DOMAIN` 付き）が走る。
-手動で出したいときは `step: deploy`。
+main への push ごとに、ビルド → D1 マイグレーション → デプロイ
+（`HOME_PORTAL_DOMAIN` 付き）が走る。手動で出したいときは `step: deploy`。
+`HOME_PORTAL_DOMAIN` があると workers.dev は無効になる（`cloudflare.config.ts`
+の `workersDev`）。
 
 ### ロールバック
 

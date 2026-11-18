@@ -10,13 +10,12 @@ name: cloudflare
 #                empty D1, then verify row counts (job summary)
 #   cutover      apply migrations, deploy with the custom domain
 #                (vars.HOME_PORTAL_DOMAIN)
-#   deploy       same as a push to main
-# Pushes to main deploy only when vars.CLOUDFLARE_AUTO_DEPLOY == 'true'.
+#   deploy       same as a push to main (every push to main deploys)
 #
 # Secrets: CLOUDFLARE_API_TOKEN; for import-data also TURSO_AUTH_TOKEN and,
 # optionally, DENO_KV_URL + DENO_KV_ACCESS_TOKEN.
 # Variables: HOME_PORTAL_DOMAIN (set before cutover);
-# TURSO_DATABASE_URL (optional override); CLOUDFLARE_AUTO_DEPLOY.
+# TURSO_DATABASE_URL (optional override).
 
 on:
   push:
@@ -38,7 +37,6 @@ permissions:
 
 jobs:
   cloudflare:
-    if: github.event_name == 'workflow_dispatch' || vars.CLOUDFLARE_AUTO_DEPLOY == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
