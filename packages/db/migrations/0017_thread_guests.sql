@@ -1,4 +1,4 @@
--- 0016_thread_guests — guests: non-members admitted to a single thread.
+-- 0017_thread_guests — guests: non-members admitted to a single thread.
 --
 -- A guest can read and post in one thread of a home they are not a member of
 -- (invited by a home admin with a thread invite code). Kept apart from

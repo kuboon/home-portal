@@ -53,3 +53,17 @@ export async function checkPostLimit(userId: string): Promise<boolean> {
 export async function checkRepostLimit(userId: string): Promise<boolean> {
   return await allow(kvDb, ["rl", "repost-min", userId], 5, 60_000);
 }
+
+/**
+ * True if the user may change a calendar event now (1/sec AND 20/min).
+ *
+ * Every change also posts a notice into the main channel, and that post does
+ * not go through {@link checkPostLimit}; so this keeps the same 1/sec floor,
+ * or 20 notices could land in a single second.
+ */
+export async function checkCalendarWriteLimit(
+  userId: string,
+): Promise<boolean> {
+  if (!(await allow(kvDb, ["rl", "cal-sec", userId], 1, 1_000))) return false;
+  return await allow(kvDb, ["rl", "cal-min", userId], 20, 60_000);
+}

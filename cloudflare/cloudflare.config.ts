@@ -33,13 +33,28 @@ export default defineConfig({
     placement: { region: "aws:ap-northeast-1" },
     observability: { enabled: true },
     domains: domain ? [domain] : undefined,
+    // workers.dev only until cutover; once on the custom domain it stays off
+    // (it was switched off in the dashboard, and `cf deploy` in CI aborts when
+    // the local config disagrees with the remote one).
+    workersDev: !domain,
+    // Version preview URLs stay on, as set in the dashboard. Left unset, `cf`
+    // derives `false` from `workersDev: false`, which `cf deploy` counts as a
+    // conflicting change and aborts.
+    previewUrls: true,
     // Hourly: sweep expired KV rows (D1 has no TTL).
     triggers: [triggers.scheduled({ schedule: "17 * * * *" })],
     exports: {
       ChannelHub: exports.durableObject({ storage: "sqlite" }),
     },
     env: {
-      DB: bindings.d1({ name: "home-portal" }),
+      // The id pins the existing database (created by the workflow's `setup`).
+      // Without it, `cf deploy` reads the binding as dropping the remote
+      // `database_id` and aborts when the Worker was last changed in the
+      // dashboard.
+      DB: bindings.d1({
+        name: "home-portal",
+        id: "c678afa4-f8ac-4e15-8607-9f432f3648bd",
+      }),
       CHANNEL_HUB: bindings.durableObject({
         worker: WORKER_NAME,
         exportName: "ChannelHub",
