@@ -122,6 +122,8 @@ export interface Message {
   threadId: string | null;
   authorId: string;
   authorName: string;
+  /** The author is a guest of this thread (not a member of the home). */
+  authorIsGuest: boolean;
   body: string;
   createdAt: string;
   editedAt: string | null;
@@ -145,7 +147,7 @@ export interface Message {
   reactions: ReactionSummary[];
 }
 
-function rowToThread(row: Record<string, unknown>): Thread {
+export function rowToThread(row: Record<string, unknown>): Thread {
   return {
     id: String(row.id),
     homeId: String(row.home_id),
@@ -338,6 +340,9 @@ export async function postMessage(
 // falling back to their global users.display_name.
 const MESSAGE_SELECT =
   "SELECT m.*, COALESCE(mem.display_name, u.display_name) AS display_name, " +
+  "(mem.user_id IS NULL AND m.thread_id IS NOT NULL AND EXISTS (" +
+  "SELECT 1 FROM thread_guests g WHERE g.thread_id = m.thread_id " +
+  "AND g.user_id = m.author_id)) AS author_is_guest, " +
   "o.body AS r_body, o.tombstone_at AS r_tombstone, o.hidden_at AS r_hidden, " +
   "COALESCE(omem.display_name, ou.display_name) AS r_author, " +
   "s.label AS s_label, s.storage_key AS s_key, s.content_type AS s_ctype, " +
@@ -437,6 +442,7 @@ function rowToMessage(
     threadId: row.thread_id == null ? null : String(row.thread_id),
     authorId: String(row.author_id),
     authorName: String(row.display_name),
+    authorIsGuest: Number(row.author_is_guest ?? 0) === 1,
     body: deletedForViewer ? "" : String(row.body),
     createdAt: String(row.created_at),
     editedAt: row.edited_at == null ? null : String(row.edited_at),

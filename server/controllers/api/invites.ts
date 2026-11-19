@@ -3,14 +3,30 @@
  *
  * - heartbeat / close: the admin's invite screen keeps the token alive and
  *   revokes it on close. Requires admin of the home the token grants.
- * - accept: any signed-in user redeems a live token to join as a member.
+ * - accept: any signed-in user redeems a live token. A home invite joins them
+ *   as a member; a thread invite admits them as a guest of that thread. The
+ *   body may name `as` — an agent the caller owns — to redeem on its behalf
+ *   (agents can't sign in, so their owner brings them in).
  */
 
 import { createController } from "@remix-run/fetch-router";
 
-import { addMember, getHome, getRole, HomeError } from "@scope/db";
+import {
+  addGuest,
+  addMember,
+  getAgentOwner,
+  getHome,
+  getRole,
+  getThread,
+  HomeError,
+} from "@scope/db";
 import { dpop, DpopSession } from "../../middleware/dpop.ts";
-import { closeInvite, refreshInvite, resolveInvite } from "../../invites.ts";
+import {
+  closeInvite,
+  refreshInvite,
+  resolveInvite,
+  resolveInviteTarget,
+} from "../../invites.ts";
 import { routes } from "../../routes.ts";
 
 function currentUserId(session: DpopSession): string | null {
@@ -57,15 +73,36 @@ export const invitesController = createController(routes.invitesApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { token } = context.params;
-      const homeId = await resolveInvite(token);
-      if (!homeId) return expired();
+      const target = await resolveInviteTarget(token);
+      if (!target) return expired();
       const body = await context.request.json().catch(() => ({})) as {
         displayName?: string;
+        as?: string;
       };
+      // Redeem for the caller, or for an agent the caller owns.
+      let joinerId = userId;
+      if (body.as && body.as !== userId) {
+        if (await getAgentOwner(body.as) !== userId) {
+          return Response.json(
+            { error: "自分のエージェントのみ指定できます" },
+            {
+              status: 403,
+            },
+          );
+        }
+        joinerId = body.as;
+      }
       try {
-        await addMember(homeId, userId, "member", body.displayName);
+        if (target.threadId) {
+          // A member already has access to every thread: nothing to add.
+          if (!(await getRole(target.homeId, joinerId))) {
+            await addGuest(target.threadId, joinerId, target.issuedBy);
+          }
+        } else {
+          await addMember(target.homeId, joinerId, "member", body.displayName);
+        }
       } catch (error) {
-        // Already a member is fine — fall through to returning the home.
+        // Already a member is fine — fall through to returning the target.
         if (!(error instanceof HomeError && error.status === 409)) {
           if (error instanceof HomeError) {
             return Response.json({ error: error.message }, {
@@ -75,7 +112,9 @@ export const invitesController = createController(routes.invitesApi, {
           throw error;
         }
       }
-      return Response.json({ home: await getHome(homeId) });
+      const home = await getHome(target.homeId);
+      const thread = target.threadId ? await getThread(target.threadId) : null;
+      return Response.json({ home, thread });
     },
   },
 });

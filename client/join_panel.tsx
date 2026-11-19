@@ -10,6 +10,11 @@
  *  3. Signed in → ask for the display name, prefilled with what the IdP gave
  *     us, then redeem the token with it and go to the home.
  *
+ * A thread (guest) invite (`threadTitle` set) admits the caller as a guest of
+ * that one thread instead: no display name is asked (guests use their global
+ * name), and the caller may pick one of their own agents to bring in instead
+ * of themselves (agents can't sign in, so their owner redeems for them).
+ *
  * The token is only live while the inviting admin keeps the invite screen open
  * (60s TTL kept alive by a heartbeat), so redemption can fail if they've since
  * closed it — we surface that as an expired-invite message.
@@ -28,6 +33,8 @@ export interface JoinPanelProps {
   token: string;
   /** Home name resolved server-side (empty when the token is invalid). */
   homeName: string;
+  /** Thread title for a thread (guest) invite; empty for a home invite. */
+  threadTitle: string;
   /** Whether the token resolved to a home at page render time. */
   valid: boolean;
   [key: string]: SerializableValue;
@@ -36,7 +43,8 @@ export interface JoinPanelProps {
 export const JoinPanel = clientEntry(
   "/join_panel.js#JoinPanel",
   function JoinPanel(handle: Handle<JoinPanelProps>) {
-    const { idpOrigin, token, homeName, valid } = handle.props;
+    const { idpOrigin, token, homeName, threadTitle, valid } = handle.props;
+    const isThread = !!threadTitle;
 
     let ready = false;
     let signedIn = false;
@@ -46,6 +54,10 @@ export const JoinPanel = clientEntry(
     let thumbprint = "";
     let nameDraft = "";
     let fetchDpop: FetchDpop | null = null;
+    let myUserId = "";
+    /** Thread invite: who joins — me, or one of my agents. */
+    let joinAs = "";
+    let myAgents: { id: string; displayName: string }[] = [];
 
     const accept = async () => {
       const name = nameDraft.trim();
@@ -56,7 +68,11 @@ export const JoinPanel = clientEntry(
         const response = await fetchDpop!(`/api/invites/${token}/accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(name ? { displayName: name } : {}),
+          body: JSON.stringify(
+            isThread
+              ? (joinAs && joinAs !== myUserId ? { as: joinAs } : {})
+              : (name ? { displayName: name } : {}),
+          ),
         });
         const text = await response.text();
         const data = text ? JSON.parse(text) : {};
@@ -65,11 +81,22 @@ export const JoinPanel = clientEntry(
             (data as { error?: string }).error ?? "参加に失敗しました",
           );
         }
-        const home = (data as { home?: { id: string } }).home;
+        const { home, thread } = data as {
+          home?: { id: string };
+          thread?: { id: string } | null;
+        };
         done = true;
         handle.update();
-        if (home?.id) {
-          globalThis.location.replace(`/home/${encodeURIComponent(home.id)}`);
+        if (isThread && joinAs && joinAs !== myUserId) {
+          // An agent joined: nothing to open for the human; go home.
+          globalThis.location.replace("/homes");
+        } else if (home?.id) {
+          const base = `/home/${encodeURIComponent(home.id)}`;
+          globalThis.location.replace(
+            thread?.id
+              ? `${base}/thread/${encodeURIComponent(thread.id)}`
+              : base,
+          );
         }
       } catch (e) {
         error = (e as Error).message;
@@ -95,6 +122,17 @@ export const JoinPanel = clientEntry(
           fetchDpop = session.fetchDpop;
           thumbprint = session.thumbprint;
           signedIn = session.userId != null;
+          myUserId = session.userId ?? "";
+          joinAs = myUserId;
+          if (signedIn && isThread) {
+            // Own agents, so the owner can bring one in as the guest.
+            const r = await fetchDpop("/api/agents");
+            if (r.ok) {
+              myAgents = ((await r.json()) as {
+                agents: { id: string; displayName: string }[];
+              }).agents;
+            }
+          }
           // Prefill with what the IdP gave us so the user can just confirm.
           nameDraft = session.displayName ?? "";
         } catch (e) {
@@ -127,7 +165,9 @@ export const JoinPanel = clientEntry(
         ? (
           <div class="flex flex-col items-center gap-2">
             <h1 class="card-title text-xl">参加しました 🎉</h1>
-            <p class="opacity-70 text-sm">「{homeName}」へ移動しています…</p>
+            <p class="opacity-70 text-sm">
+              「{isThread ? threadTitle : homeName}」へ移動しています…
+            </p>
           </div>
         )
         : joining
@@ -135,6 +175,48 @@ export const JoinPanel = clientEntry(
           <div class="flex flex-col items-center gap-3">
             <span class="loading loading-spinner loading-lg"></span>
             <p class="opacity-70 text-sm">参加しています…</p>
+          </div>
+        )
+        : signedIn && isThread
+        ? (
+          // Thread invite: join as a guest (me, or one of my agents).
+          <div class="flex flex-col items-center gap-4 w-full">
+            <div class="text-4xl">💬</div>
+            <h1 class="card-title text-xl">「{threadTitle}」にゲスト参加</h1>
+            <p class="opacity-70 text-sm">
+              ホーム「{homeName}」のこのスレッドだけに参加します。
+              ほかのスレッドやメンバー一覧は見えません。
+            </p>
+            {myAgents.length > 0
+              ? (
+                <div class="w-full text-left">
+                  <label class="text-sm opacity-70">参加するアカウント</label>
+                  <select
+                    class="select select-bordered w-full mt-1"
+                    mix={[on("change", (e) => {
+                      joinAs = (e.target as HTMLSelectElement).value;
+                      handle.update();
+                    })]}
+                  >
+                    <option value={myUserId} selected={joinAs === myUserId}>
+                      自分
+                    </option>
+                    {myAgents.map((a) => (
+                      <option value={a.id} selected={joinAs === a.id}>
+                        🤖 {a.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )
+              : null}
+            <button
+              type="button"
+              class="btn btn-primary w-full"
+              mix={[on("click", () => accept())]}
+            >
+              ゲストとして参加する
+            </button>
           </div>
         )
         : signedIn
@@ -179,9 +261,15 @@ export const JoinPanel = clientEntry(
         : (
           <div class="flex flex-col items-center gap-4 w-full">
             <div class="text-4xl">🏠</div>
-            <h1 class="card-title text-xl">「{homeName}」への招待</h1>
+            <h1 class="card-title text-xl">
+              {isThread
+                ? `「${threadTitle}」（${homeName}）への招待`
+                : `「${homeName}」への招待`}
+            </h1>
             <p class="opacity-70 text-sm">
-              パスキーでサインイン／新規登録すると、このホームに参加できます。
+              {isThread
+                ? "パスキーでサインイン／新規登録すると、このスレッドにゲスト参加できます。"
+                : "パスキーでサインイン／新規登録すると、このホームに参加できます。"}
             </p>
             <button
               type="button"

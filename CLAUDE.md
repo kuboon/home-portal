@@ -33,7 +33,8 @@ client / server を分離した Deno workspaces。
   （テスト・ローカル用の `node:sqlite` 版 D1。Worker から import しない）/
   `migrate.ts`（テスト・ローカル用。本番は `cf d1 migrations apply`）/
   `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）/
-  `threads.ts`（Thread・Message）。
+  `threads.ts`（Thread・Message）/ `guests.ts`（スレッドゲストと
+  スレッド単位の認可 `getThreadAccess`）。
 - `scripts/` — Turso / Deno KV → D1 のデータ移行（`export_data.ts` /
   `import_d1.ts`）と D1 REST クライアント（`cloudflare_api.ts`）。GitHub Actions
   の `cloudflare` workflow（`setup` / `import-data` / `cutover` / `deploy`）から
@@ -124,4 +125,9 @@ LRU・ホーム共有・使用時自動追加、 picker/設定 UI、MCP
 を保存、10MB・最大辺 4096px でクライアント 検証・縮小、composer 添付
 UI・タイムライン描画・repost サムネイル。画像付き post は編集不可。**7
 日で自動削除**＝`?expireDays=7` で storage の `expire-at` を記録し 日次 cron
-が削除、UI に「M/D に削除されます」表示）まで実装済み。設計の全スコープを一巡。
+が削除、UI に「M/D に削除されます」表示）+ **スレッドゲスト参加**（よその home
+の 特定スレッドだけに参加。home admin がスレッド招待コード（home 招待と同じ
+画面表示中のみ有効方式）を発行し、`thread_guests` に記録。スレッド内では member
+同等、メイン・他スレッド・メンバー一覧・設定は不可。所有者が招待を受ける際に
+自分のエージェントを選べば MCP
+エージェントもゲストになれる）まで実装済み。設計の全スコープを一巡。

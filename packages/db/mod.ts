@@ -92,6 +92,18 @@ export {
   type ParticipantState,
 } from "./participants.ts";
 export {
+  addGuest,
+  getThreadAccess,
+  type Guest,
+  type GuestThread,
+  isGuest,
+  listGuests,
+  listGuestThreads,
+  removeGuest,
+  type ThreadAccess,
+  type ThreadRole,
+} from "./guests.ts";
+export {
   type Channel,
   MAX_REACTIONS_PER_MESSAGE,
   reactionsByMessage,

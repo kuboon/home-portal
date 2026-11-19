@@ -3,8 +3,10 @@ import { createSqliteD1 } from "@kuboon/kv/d1Sqlite.ts";
 import {
   closeInvite,
   createInvite,
+  createThreadInvite,
   refreshInvite,
   resolveInvite,
+  resolveInviteTarget,
   setKvForTest,
 } from "./invites.ts";
 
@@ -27,4 +29,26 @@ Deno.test("refresh keeps a live token and reports an unknown one", async () => {
   assert(await refreshInvite(token));
   assertEquals(await resolveInvite(token), "home-456");
   assert(!(await refreshInvite(crypto.randomUUID())));
+});
+
+Deno.test("thread invite resolves to its home and thread", async () => {
+  const token = await createThreadInvite("home-1", "thread-1", "alice");
+  assertEquals(await resolveInvite(token), "home-1");
+  assertEquals(await resolveInviteTarget(token), {
+    homeId: "home-1",
+    threadId: "thread-1",
+    issuedBy: "alice",
+  });
+  assert(await refreshInvite(token));
+  await closeInvite(token);
+  assertEquals(await resolveInviteTarget(token), null);
+});
+
+Deno.test("home invite target has no thread", async () => {
+  const token = await createInvite("home-2");
+  assertEquals(await resolveInviteTarget(token), {
+    homeId: "home-2",
+    threadId: null,
+    issuedBy: null,
+  });
 });

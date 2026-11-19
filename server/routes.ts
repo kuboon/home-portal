@@ -94,6 +94,16 @@ export const routes = route({
     leave: post("/threads/:threadId/leave"),
     /** POST /api/threads/:threadId/title — rename a thread (creator or admin). */
     renameThread: post("/threads/:threadId/title"),
+    /** GET /api/threads/:threadId/access — caller's role + home summary. */
+    access: get("/threads/:threadId/access"),
+    /** GET /api/guest-threads — threads the caller is a guest of. */
+    guestThreads: get("/guest-threads"),
+    /** GET /api/threads/:threadId/guests — a thread's guests (members). */
+    guests: get("/threads/:threadId/guests"),
+    /** DELETE /api/threads/:threadId/guests/:userId — remove (admin / self). */
+    removeGuest: del("/threads/:threadId/guests/:userId"),
+    /** POST /api/threads/:threadId/invite — issue a guest invite (admin). */
+    invite: post("/threads/:threadId/invite"),
     /** POST /api/threads/:threadId/pickup — pick up posts into a thread. */
     pickup: post("/threads/:threadId/pickup"),
     /** GET /api/homes/:homeId/messages — main-channel messages (members). */

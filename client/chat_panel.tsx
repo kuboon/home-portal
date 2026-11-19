@@ -112,6 +112,12 @@ interface Thread {
   joined: boolean;
 }
 
+interface Guest {
+  userId: string;
+  displayName: string;
+  isAgent: boolean;
+}
+
 interface Member {
   userId: string;
   displayName: string;
@@ -151,6 +157,8 @@ interface Message {
   id: string;
   authorId: string;
   authorName: string;
+  /** スレッドのゲスト（ホームのメンバーではない）の投稿。 */
+  authorIsGuest?: boolean;
   body: string;
   createdAt: string;
   editedAt: string | null;
@@ -238,7 +246,9 @@ export const ChatPanel = clientEntry(
     let thumbprint = "";
     let error = "";
     let homeName = "";
-    let role: "admin" | "member" | null = null;
+    /** "guest" = よその home のスレッドにゲスト参加している。 */
+    let role: "admin" | "member" | "guest" | null = null;
+    const isGuest = () => role === "guest";
     let threads: Thread[] = [];
     let currentThreadId: string | null = handle.props.threadId || null;
     let messages: Message[] = [];
@@ -302,6 +312,11 @@ export const ChatPanel = clientEntry(
     let agentTokenCopied = false;
     let themeDraft = "";
     let inviteToken: string | null = null;
+    /** 発行中の招待がスレッドのゲスト招待なら、そのスレッド id。 */
+    let inviteThreadId: string | null = null;
+    // スレッドのゲスト一覧パネル。
+    let guestsOpen = false;
+    let guests: Guest[] = [];
     let inviteTimer: ReturnType<typeof setInterval> | null = null;
     let inviteCopied = false;
 
@@ -403,10 +418,45 @@ export const ChatPanel = clientEntry(
       }
     };
 
+    /**
+     * ゲストとしてのアクセス情報を取り、サイドバーには招待されたスレッド
+     * だけを出す。スレッド未指定なら、このホームで最初のゲストスレッドへ。
+     */
+    const loadGuestAccess = async () => {
+      let threadId = currentThreadId;
+      if (!threadId) {
+        const g = await api("/api/guest-threads") as {
+          guestThreads: { home: { id: string }; thread: Thread }[];
+        };
+        threadId = g.guestThreads.find((x) => x.home.id === homeId)?.thread
+          .id ?? null;
+      }
+      if (!threadId) throw new Error("このホームにアクセスできません");
+      const acc = await api(`/api/threads/${threadId}/access`) as {
+        role: "admin" | "member" | "guest";
+        home: { name: string; themeCss: string };
+        guestThreads: Omit<Thread, "joined">[];
+      };
+      homeName = acc.home.name;
+      role = acc.role;
+      themeCss = acc.home.themeCss;
+      applyTheme(themeCss);
+      threads = acc.guestThreads.map((t) => ({ ...t, joined: true }));
+      if (currentThreadId !== threadId) {
+        currentThreadId = threadId;
+        if (typeof history !== "undefined") {
+          history.replaceState({}, "", urlFor(threadId));
+        }
+      }
+    };
+
     const loadHome = async () => {
       const data = await api("/api/homes") as { homes: HomeWithRole[] };
       const home = data.homes.find((h) => h.id === homeId);
-      if (!home) throw new Error("このホームにアクセスできません");
+      if (!home) {
+        await loadGuestAccess();
+        return;
+      }
       homeName = home.name;
       role = home.role;
       themeCss = home.themeCss;
@@ -414,6 +464,10 @@ export const ChatPanel = clientEntry(
     };
 
     const loadThreads = async () => {
+      if (isGuest()) {
+        await loadGuestAccess();
+        return;
+      }
       const data = await api(`/api/homes/${homeId}/threads`) as {
         threads: Thread[];
       };
@@ -433,9 +487,12 @@ export const ChatPanel = clientEntry(
     };
 
     const loadStamps = async () => {
+      // ゲストはホーム共有スタンプを見られない（自分のライブラリのみ）。
       const [mine, home] = await Promise.all([
         api("/api/stamps") as Promise<{ stamps: Stamp[] }>,
-        api(`/api/homes/${homeId}/stamps`) as Promise<{ stamps: Stamp[] }>,
+        isGuest()
+          ? Promise.resolve({ stamps: [] as Stamp[] })
+          : api(`/api/homes/${homeId}/stamps`) as Promise<{ stamps: Stamp[] }>,
       ]);
       myStamps = mine.stamps;
       homeStamps = home.stamps;
@@ -774,6 +831,61 @@ export const ChatPanel = clientEntry(
         await loadThreads();
       });
 
+    const loadGuests = async () => {
+      if (!currentThreadId) return;
+      const data = await api(`/api/threads/${currentThreadId}/guests`) as {
+        guests: Guest[];
+      };
+      guests = data.guests;
+    };
+
+    const openGuests = () =>
+      run(async () => {
+        closeDrawer();
+        await loadGuests();
+        guestsOpen = true;
+      });
+
+    const closeGuests = () => {
+      guestsOpen = false;
+      if (inviteThreadId) {
+        const token = inviteToken;
+        stopInviteHeartbeat();
+        if (token) {
+          api(`/api/invites/${token}`, { method: "DELETE" }).catch(() => {});
+        }
+      }
+      handle.update();
+    };
+
+    const onRemoveGuest = (uid: string) =>
+      run(async () => {
+        if (!currentThreadId) return;
+        await api(`/api/threads/${currentThreadId}/guests/${uid}`, {
+          method: "DELETE",
+        });
+        await loadGuests();
+      });
+
+    /** ゲストが自分でスレッドから抜ける。残りが無ければホーム一覧へ。 */
+    const onQuitGuest = (threadId: string) =>
+      run(async () => {
+        if (!userId) return;
+        if (!globalThis.confirm("このスレッドのゲスト参加をやめますか？")) {
+          return;
+        }
+        await api(`/api/threads/${threadId}/guests/${userId}`, {
+          method: "DELETE",
+        });
+        const rest = threads.filter((t) => t.id !== threadId);
+        if (rest.length === 0) {
+          location.href = "/homes";
+          return;
+        }
+        await selectChannel(rest[0].id);
+        await loadThreads();
+      });
+
     const loadMembers = async () => {
       const data = await api(`/api/homes/${homeId}/members`) as {
         members: Member[];
@@ -912,15 +1024,21 @@ export const ChatPanel = clientEntry(
         inviteTimer = null;
       }
       inviteToken = null;
+      inviteThreadId = null;
       inviteCopied = false;
     };
 
-    const onInvite = () =>
+    /** 招待を発行（threadId 指定でそのスレッドへのゲスト招待）。 */
+    const onInvite = (threadId: string | null = null) =>
       run(async () => {
-        const data = await api(`/api/homes/${homeId}/invite`, {
-          method: "POST",
-        }) as { token: string };
+        const data = await api(
+          threadId
+            ? `/api/threads/${threadId}/invite`
+            : `/api/homes/${homeId}/invite`,
+          { method: "POST" },
+        ) as { token: string };
         inviteToken = data.token;
+        inviteThreadId = threadId;
         inviteCopied = false;
         if (inviteTimer !== null) clearInterval(inviteTimer);
         inviteTimer = setInterval(() => {
@@ -1174,8 +1292,15 @@ export const ChatPanel = clientEntry(
               loadMessages(),
               loadRecentEmojis(),
             ]);
-            const failed = results.find((r) => r.status === "rejected");
-            if (failed) throw (failed as PromiseRejectedResult).reason;
+            if (isGuest()) {
+              // ゲストはホームのスレッド一覧・メインを読めない（403 は想定内）。
+              // loadHome がゲスト用スレッドへ切り替えたので本文を取り直す。
+              if (results[0].status === "rejected") throw results[0].reason;
+              await loadMessages();
+            } else {
+              const failed = results.find((r) => r.status === "rejected");
+              if (failed) throw (failed as PromiseRejectedResult).reason;
+            }
             startStream(currentThreadId);
             // ホームを開けたら、必要なら A2HS 案内をポップアップ。
             maybePromptA2hs(homeId);
@@ -1305,6 +1430,9 @@ export const ChatPanel = clientEntry(
             {grouped ? null : (
               <div class="flex items-baseline gap-2 flex-wrap">
                 <span class="font-bold leading-tight">{m.authorName}</span>
+                {m.authorIsGuest
+                  ? <span class="badge badge-xs badge-ghost">ゲスト</span>
+                  : null}
                 {pending
                   ? <span class="text-xs opacity-50">送信中…</span>
                   : (
@@ -1504,15 +1632,17 @@ export const ChatPanel = clientEntry(
                     😀
                   </button>
                 )}
-                <button
-                  type="button"
-                  class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
-                  aria-label="スレッドで返信"
-                  title="スレッドで返信"
-                  mix={[on("click", () => onPickupToNewThread(m.id))]}
-                >
-                  ↩︎
-                </button>
+                {isGuest() ? null : (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm rounded-none px-2.5 text-lg"
+                    aria-label="スレッドで返信"
+                    title="スレッドで返信"
+                    mix={[on("click", () => onPickupToNewThread(m.id))]}
+                  >
+                    ↩︎
+                  </button>
+                )}
                 {!archived() && mine && m.kind === "normal" && !m.image
                   ? (
                     <button
@@ -1831,7 +1961,13 @@ export const ChatPanel = clientEntry(
           </a>
         </div>
         <nav class="flex-1 overflow-y-auto px-2 py-2">
-          {channelItem(null, "メイン")}
+          {isGuest()
+            ? (
+              <div class="px-2 pt-2 pb-1 text-xs opacity-60">
+                ゲストとして参加中のスレッドのみ表示しています
+              </div>
+            )
+            : channelItem(null, "メイン")}
           {threadGroup(
             "参加中",
             threads.filter((t) => !t.archivedAt && t.joined),
@@ -1848,17 +1984,96 @@ export const ChatPanel = clientEntry(
             "🗄",
           )}
         </nav>
-        <div class="p-2 border-t border-base-content/10 shrink-0">
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm w-full justify-start gap-2"
-            aria-label="メニュー"
-            mix={[on("click", openSettings)]}
-          >
-            <span class="opacity-70">⚙</span> 設定
-          </button>
-        </div>
+        {isGuest()
+          ? null
+          : (
+            <div class="p-2 border-t border-base-content/10 shrink-0">
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm w-full justify-start gap-2"
+                aria-label="メニュー"
+                mix={[on("click", openSettings)]}
+              >
+                <span class="opacity-70">⚙</span> 設定
+              </button>
+            </div>
+          )}
       </aside>
+    );
+
+    /** スレッドのゲスト一覧（admin は招待・削除もできる）。 */
+    const guestsOverlay = () => (
+      <div class="fixed inset-0 z-30 bg-base-100 overflow-y-auto">
+        <div class="max-w-2xl mx-auto p-4 space-y-4">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold"># {channelName()} のゲスト</h2>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              aria-label="閉じる"
+              mix={[on("click", closeGuests)]}
+            >
+              ✕
+            </button>
+          </div>
+          {error
+            ? (
+              <div role="alert" class="alert alert-error alert-soft">
+                <span>{error}</span>
+              </div>
+            )
+            : null}
+          <p class="text-sm opacity-70">
+            ゲストはこのホームのメンバーではありませんが、このスレッドだけを
+            閲覧・投稿できます。ほかのスレッドやメイン、メンバー一覧は見えません。
+          </p>
+          {role === "admin"
+            ? (
+              <div>
+                {inviteToken && inviteThreadId === currentThreadId
+                  ? inviteCard()
+                  : (
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline"
+                      disabled={archived()}
+                      mix={[on("click", () => onInvite(currentThreadId))]}
+                    >
+                      ゲスト招待リンクを発行
+                    </button>
+                  )}
+              </div>
+            )
+            : null}
+          {guests.length === 0
+            ? <p class="text-sm opacity-60">ゲストはいません。</p>
+            : (
+              <ul class="divide-y divide-base-300">
+                {guests.map((g) => (
+                  <li key={g.userId} class="flex items-center gap-2 py-2">
+                    <span class="flex-1 truncate">
+                      {g.displayName}
+                      {g.isAgent
+                        ? <span class="badge badge-xs ml-1">AI</span>
+                        : null}
+                    </span>
+                    {role === "admin"
+                      ? (
+                        <button
+                          type="button"
+                          class="btn btn-xs btn-ghost text-error"
+                          mix={[on("click", () => onRemoveGuest(g.userId))]}
+                        >
+                          削除
+                        </button>
+                      )
+                      : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+        </div>
+      </div>
     );
 
     const settingsOverlay = () => (
@@ -1960,8 +2175,10 @@ export const ChatPanel = clientEntry(
       return (
         <div class="rounded-box border border-base-300 bg-base-100 p-3 space-y-3">
           <p class="text-xs opacity-60">
-            この画面を開いている間だけ有効な招待リンクです。相手のスマホで QR
-            を読み取るか、リンクを共有してください。
+            {inviteThreadId
+              ? "この画面を開いている間だけ有効な、このスレッドへのゲスト招待リンクです。"
+              : "この画面を開いている間だけ有効な招待リンクです。"}
+            相手のスマホで QR を読み取るか、リンクを共有してください。
           </p>
           <div class="flex justify-center">
             <svg
@@ -2189,11 +2406,11 @@ export const ChatPanel = clientEntry(
             </button>
           </div>
           <div class="mt-2">
-            {inviteToken ? inviteCard() : (
+            {inviteToken && !inviteThreadId ? inviteCard() : (
               <button
                 type="button"
                 class="btn btn-sm btn-outline"
-                mix={[on("click", onInvite)]}
+                mix={[on("click", () => onInvite())]}
               >
                 招待リンクを発行
               </button>
@@ -2346,15 +2563,17 @@ export const ChatPanel = clientEntry(
                 </div>
               )}
             <ul class="menu w-full text-base pb-1">
-              <li>
-                <a
-                  mix={[
-                    on("click", () => act(() => onPickupToNewThread(m.id))),
-                  ]}
-                >
-                  <span class="w-6 text-center">↩︎</span> スレッドで返信
-                </a>
-              </li>
+              {isGuest() ? null : (
+                <li>
+                  <a
+                    mix={[
+                      on("click", () => act(() => onPickupToNewThread(m.id))),
+                    ]}
+                  >
+                    <span class="w-6 text-center">↩︎</span> スレッドで返信
+                  </a>
+                </li>
+              )}
               {!archived() && mine && m.kind === "normal" && !m.image
                 ? (
                   <li>
@@ -2421,6 +2640,7 @@ export const ChatPanel = clientEntry(
       return (
         <div class="chat-shell">
           {settingsOpen ? settingsOverlay() : null}
+          {guestsOpen ? guestsOverlay() : null}
           {menuFor ? contextSheet() : null}
           {
             /* DOM 順は [本文, サイドバー]。容器の direction: rtl でスクロール
@@ -2461,6 +2681,31 @@ export const ChatPanel = clientEntry(
                 : null}
               {archived()
                 ? <span class="badge badge-sm">アーカイブ（読み取り専用）</span>
+                : null}
+              {currentThreadId && !isGuest()
+                ? (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    aria-label="ゲスト"
+                    title="ゲスト"
+                    mix={[on("click", () => openGuests())]}
+                  >
+                    👤 ゲスト
+                  </button>
+                )
+                : null}
+              {currentThreadId && isGuest()
+                ? (
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    title="このスレッドのゲスト参加をやめる"
+                    mix={[on("click", () => onQuitGuest(currentThreadId!))]}
+                  >
+                    ゲストをやめる
+                  </button>
+                )
                 : null}
               {currentThreadId && currentThread()?.joined && !archived()
                 ? (

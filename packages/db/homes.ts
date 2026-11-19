@@ -183,6 +183,12 @@ export async function addMember(
       "INSERT INTO memberships (home_id, user_id, role, display_name) VALUES (?, ?, ?, ?)",
     args: [homeId, userId, role, displayName?.trim() || null],
   });
+  // A former guest of some thread here now has full access: drop guest rows.
+  await (await db()).execute({
+    sql: "DELETE FROM thread_guests WHERE user_id = ? AND thread_id IN " +
+      "(SELECT id FROM threads WHERE home_id = ?)",
+    args: [userId, homeId],
+  });
   const member = (await listMembers(homeId)).find((m) => m.userId === userId);
   if (!member) throw new Error("addMember failed to read back");
   return member;
