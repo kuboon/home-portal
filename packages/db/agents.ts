@@ -109,7 +109,7 @@ export async function getAgentOwner(agentId: string): Promise<string | null> {
 
 /**
  * Revoke an agent (owner only): drop its token and remove it from every home
- * so it can neither authenticate nor linger as a member. The `users` row is
+ * (and every thread it guests) so it can neither authenticate nor linger. The `users` row is
  * kept so its past messages keep their author. Returns whether anything was
  * revoked.
  */
@@ -133,6 +133,10 @@ export async function deleteAgent(
     },
     {
       sql: "DELETE FROM memberships WHERE user_id = ?",
+      args: [agentId],
+    },
+    {
+      sql: "DELETE FROM thread_guests WHERE user_id = ?",
       args: [agentId],
     },
   ], "write");

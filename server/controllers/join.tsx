@@ -6,14 +6,15 @@
  * then redeems the token (`POST /api/invites/:token/accept`) to join the home,
  * finally redirecting to the chat view. The token's home name is resolved
  * server-side so the invitee sees which home they're joining before signing in
- * (the token grants that home already, so this leaks nothing new).
+ * (the token grants that home already, so this leaks nothing new). A thread
+ * (guest) invite also shows the thread's title.
  */
 
 import { createAction } from "@remix-run/fetch-router";
-import { getHome } from "@scope/db";
+import { getHome, getThread } from "@scope/db";
 import { JoinPanel } from "../../client/join_panel.tsx";
 import { routes } from "../routes.ts";
-import { resolveInvite } from "../invites.ts";
+import { resolveInviteTarget } from "../invites.ts";
 import { renderBareDocument } from "../utils/render.tsx";
 import { IDP_ORIGIN } from "../config.ts";
 
@@ -22,15 +23,21 @@ const idpOrigin = IDP_ORIGIN;
 export const joinAction = createAction(routes.join, {
   async handler(context) {
     const { token } = context.params;
-    const homeId = await resolveInvite(token);
-    const home = homeId ? await getHome(homeId) : null;
-    const title = home ? `${home.name} に参加` : "招待";
+    const target = await resolveInviteTarget(token);
+    const home = target ? await getHome(target.homeId) : null;
+    const thread = target?.threadId ? await getThread(target.threadId) : null;
+    const title = home
+      ? thread
+        ? `${thread.title}（${home.name}）にゲスト参加`
+        : `${home.name} に参加`
+      : "招待";
     return renderBareDocument(
       title,
       <JoinPanel
         idpOrigin={idpOrigin}
         token={token}
         homeName={home?.name ?? ""}
+        threadTitle={thread?.title ?? ""}
         valid={home != null}
       />,
     );

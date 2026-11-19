@@ -33,7 +33,8 @@ client / server を分離した Deno workspaces。
   （テスト・ローカル用の `node:sqlite` 版 D1。Worker から import しない）/
   `migrate.ts`（テスト・ローカル用。本番は `cf d1 migrations apply`）/
   `migrations/` / `users.ts` / `homes.ts`（Home・メンバーシップ）/
-  `threads.ts`（Thread・Message）/ `calendar.ts`（カレンダーの予定）。
+  `threads.ts`（Thread・Message）/ `calendar.ts`（カレンダーの予定）/
+  `guests.ts`（スレッドゲストとスレッド単位の認可 `getThreadAccess`）。
 - `scripts/` — Turso / Deno KV → D1 のデータ移行（`export_data.ts` /
   `import_d1.ts`）と D1 REST クライアント（`cloudflare_api.ts`）。GitHub Actions
   の `cloudflare` workflow（`setup` / `import-data` / `cutover` / `deploy`）から
@@ -131,4 +132,9 @@ UI・タイムライン描画・repost サムネイル。画像付き post は�
 チャンネルへ告知 post。日付は TZ を持たない文字列。チャット画面のペインとして
 `/home/:homeId/calendar`、API は `createResourcesRoutes` で
 `/api/homes/:homeId/events`、SSE はホーム単位。MCP
-`list_events`/`create_event`/`update_event`/`delete_event`）。
+`list_events`/`create_event`/`update_event`/`delete_event`）+
+**スレッドゲスト参加**（よその home の特定スレッドだけに参加。home admin が
+スレッド招待コード（home 招待と同じ画面表示中のみ有効方式）を発行し、
+`thread_guests` に記録。スレッド内では member 同等、メイン・他スレッド・
+カレンダー・メンバー一覧・設定は不可。所有者が招待を受ける際に自分の
+エージェントを選べば MCP エージェントもゲストになれる）。

@@ -38,6 +38,11 @@ export const HomesPanel = clientEntry(
     let displayName: string | null = null;
     let error = "";
     let homes: HomeWithRole[] = [];
+    /** よその home でゲスト参加しているスレッド。 */
+    let guestThreads: {
+      home: { id: string; name: string };
+      thread: { id: string; title: string; archivedAt: string | null };
+    }[] = [];
     let newHomeName = "";
     let joinCode = "";
     let signoutBusy = false;
@@ -57,8 +62,14 @@ export const HomesPanel = clientEntry(
     };
 
     const loadHomes = async () => {
-      const data = await api("/api/homes") as { homes: HomeWithRole[] };
+      const [data, guest] = await Promise.all([
+        api("/api/homes") as Promise<{ homes: HomeWithRole[] }>,
+        api("/api/guest-threads") as Promise<{
+          guestThreads: typeof guestThreads;
+        }>,
+      ]);
       homes = data.homes;
+      guestThreads = guest.guestThreads;
     };
 
     const run = async (fn: () => Promise<void>) => {
@@ -93,12 +104,18 @@ export const HomesPanel = clientEntry(
         if (!code) return;
         const chosen =
           globalThis.prompt("このホームでの表示名", displayName ?? "") ?? "";
-        await api(`/api/invites/${code}/accept`, {
+        const data = await api(`/api/invites/${code}/accept`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ displayName: chosen }),
-        });
+        }) as { home?: { id: string }; thread?: { id: string } | null };
         joinCode = "";
+        // スレッドへのゲスト招待なら、そのスレッドを開く。
+        if (data.home && data.thread) {
+          globalThis.location.href =
+            `/home/${data.home.id}/thread/${data.thread.id}`;
+          return;
+        }
         await loadHomes();
       });
 
@@ -201,6 +218,41 @@ export const HomesPanel = clientEntry(
               </p>
             </div>
           </div>
+
+          {guestThreads.length > 0
+            ? (
+              <div class="card card-border bg-base-100">
+                <div class="card-body">
+                  <h2 class="card-title">ゲスト参加中のスレッド</h2>
+                  <ul class="menu bg-base-200 rounded-box">
+                    {guestThreads.map((g) => (
+                      <li>
+                        <a
+                          class="flex items-center justify-between gap-2"
+                          href={`/home/${g.home.id}/thread/${g.thread.id}`}
+                        >
+                          <span class="flex-1">
+                            <span class="font-medium"># {g.thread.title}</span>
+                            <span class="text-xs opacity-60 ml-2">
+                              {g.home.name}
+                            </span>
+                            {g.thread.archivedAt
+                              ? (
+                                <span class="badge badge-sm ml-1">
+                                  アーカイブ
+                                </span>
+                              )
+                              : null}
+                          </span>
+                          <span class="btn btn-primary btn-xs">開く →</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )
+            : null}
 
           <div class="grid gap-6 sm:grid-cols-2">
             <div class="card card-border bg-base-100">

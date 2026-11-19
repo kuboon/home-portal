@@ -2,6 +2,9 @@
  * MCP tools — web-parity operations an agent can perform, acting as its own
  * `is_agent` user. Each tool reuses the same DB layer, membership checks, and
  * rate limits as the web UI, so an agent has no more power than a human member.
+ * An agent can also be a guest of a single thread in another home (its owner
+ * redeemed a thread invite for it): thread-scoped tools then work there, while
+ * home-scoped ones (main channel, create_thread, pickup) stay members only.
  */
 
 import {
@@ -13,8 +16,10 @@ import {
   getMessageContext,
   getRole,
   getThread,
+  getThreadAccess,
   HomeError,
   listEvents,
+  listGuestThreads,
   listHomesForUser,
   listHomeStamps,
   listLibrary,
@@ -69,6 +74,29 @@ async function requireMember(homeId: string, agentId: string): Promise<string> {
   return role;
 }
 
+/** Assert the agent can access a thread (member or guest), returning its role. */
+async function requireThreadAccess(
+  threadId: string,
+  agentId: string,
+): Promise<string> {
+  const access = await getThreadAccess(threadId, agentId);
+  if (!access) {
+    if (!(await getThread(threadId))) throw new ToolError("thread not found");
+    throw new ToolError("no access to this thread");
+  }
+  return access.role;
+}
+
+/** Assert access to a message's channel (thread access, or main = members). */
+async function requireChannelAccess(
+  ctx: { homeId: string; threadId: string | null },
+  agentId: string,
+): Promise<string> {
+  return ctx.threadId
+    ? await requireThreadAccess(ctx.threadId, agentId)
+    : await requireMember(ctx.homeId, agentId);
+}
+
 async function homeIdOfThread(threadId: string): Promise<string> {
   const thread = await getThread(threadId);
   if (!thread) throw new ToolError("thread not found");
@@ -121,13 +149,34 @@ const TIME_SCHEMA = {
 export const tools: McpTool[] = [
   {
     name: "list_homes",
-    description: "List the homes (servers) this agent is a member of.",
+    description:
+      "List the homes (servers) this agent is a member of, plus homes where " +
+      "it is a guest of some thread (`guest: true`, role 'guest').",
     inputSchema: { type: "object", properties: {} },
-    handler: (agentId) => listHomesForUser(agentId),
+    async handler(agentId) {
+      const homes: Json[] = (await listHomesForUser(agentId)).map((h) => ({
+        ...h,
+        guest: false,
+      }));
+      const seen = new Set(homes.map((h) => h.id));
+      for (const g of await listGuestThreads(agentId)) {
+        if (seen.has(g.home.id)) continue;
+        seen.add(g.home.id);
+        homes.push({
+          id: g.home.id,
+          name: g.home.name,
+          role: "guest",
+          guest: true,
+        });
+      }
+      return homes;
+    },
   },
   {
     name: "list_threads",
-    description: "List threads in a home the agent belongs to.",
+    description:
+      "List threads in a home the agent belongs to (as a guest: only the " +
+      "threads it was invited to).",
     inputSchema: {
       type: "object",
       properties: { homeId: { type: "string" } },
@@ -135,8 +184,12 @@ export const tools: McpTool[] = [
     },
     async handler(agentId, args) {
       const homeId = str(args, "homeId");
-      await requireMember(homeId, agentId);
-      return await listThreads(homeId);
+      if (await getRole(homeId, agentId)) return await listThreads(homeId);
+      const guestThreads = await listGuestThreads(agentId, homeId);
+      if (guestThreads.length === 0) {
+        throw new ToolError("not a member of this home");
+      }
+      return guestThreads.map((g) => g.thread);
     },
   },
   {
@@ -149,9 +202,7 @@ export const tools: McpTool[] = [
     },
     async handler(agentId, args) {
       const threadId = str(args, "threadId");
-      const thread = await getThread(threadId);
-      if (!thread) throw new ToolError("thread not found");
-      const role = await requireMember(thread.homeId, agentId);
+      const role = await requireThreadAccess(threadId, agentId);
       return await listMessages(threadId, agentId, role === "admin");
     },
   },
@@ -187,9 +238,7 @@ export const tools: McpTool[] = [
     },
     async handler(agentId, args) {
       const threadId = str(args, "threadId");
-      const thread = await getThread(threadId);
-      if (!thread) throw new ToolError("thread not found");
-      const role = await requireMember(thread.homeId, agentId);
+      const role = await requireThreadAccess(threadId, agentId);
       try {
         return await renameThread({
           threadId,
@@ -228,7 +277,8 @@ export const tools: McpTool[] = [
       const homeId = threadId
         ? await homeIdOfThread(threadId)
         : str(args, "homeId");
-      await requireMember(homeId, agentId);
+      if (threadId) await requireThreadAccess(threadId, agentId);
+      else await requireMember(homeId, agentId);
       if (!(await checkPostLimit(agentId))) throw new ToolError("rate limited");
       try {
         const message = await postMessage({
@@ -267,14 +317,14 @@ export const tools: McpTool[] = [
     async handler(agentId, args) {
       const threadId = str(args, "threadId");
       const homeId = await homeIdOfThread(threadId);
-      await requireMember(homeId, agentId);
-      // Must be able to see the source message — a member of its home — so an
-      // agent can't lift content out of a home it doesn't belong to (parity
-      // with the web /api repost endpoint).
+      await requireThreadAccess(threadId, agentId);
+      // Must be able to see the source message — member of its home, or guest
+      // of its thread — so an agent can't lift content out of a channel it
+      // can't read (parity with the web /api repost endpoint).
       const sourceMessageId = str(args, "sourceMessageId");
       const src = await getMessageContext(sourceMessageId);
       if (!src) throw new ToolError("source message not found");
-      await requireMember(src.homeId, agentId);
+      await requireChannelAccess(src, agentId);
       if (!(await checkRepostLimit(agentId))) {
         throw new ToolError("rate limited");
       }
@@ -373,7 +423,7 @@ export const tools: McpTool[] = [
       const threadId = str(args, "threadId");
       const stampId = str(args, "stampId");
       const homeId = await homeIdOfThread(threadId);
-      await requireMember(homeId, agentId);
+      await requireThreadAccess(threadId, agentId);
       if (!(await canUseStamp(stampId, agentId, homeId))) {
         throw new ToolError("stamp not found or not usable in this home");
       }
@@ -411,7 +461,7 @@ export const tools: McpTool[] = [
       const messageId = str(args, "messageId");
       const ctx = await getMessageContext(messageId);
       if (!ctx) throw new ToolError("message not found");
-      await requireMember(ctx.homeId, agentId);
+      await requireChannelAccess(ctx, agentId);
       // Reject archived threads; main-channel messages (no thread) never archive.
       if (ctx.threadId) await homeIdOfThread(ctx.threadId);
       try {

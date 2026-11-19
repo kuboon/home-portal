@@ -1,8 +1,11 @@
 /**
  * /api — DPoP-protected Thread + Message endpoints.
  *
- * Reading and posting require the caller to be a member of the thread's home.
- * The acting user is the `userId` bound to the DPoP session.
+ * Thread-scoped actions (read, post, react, repost into, edit/delete) need
+ * thread access: membership in the thread's home, or being a guest of that
+ * thread (`getThreadAccess`). Home-scoped actions (thread list/create, pickup,
+ * the main channel) stay members only. The acting user is the `userId` bound
+ * to the DPoP session.
  */
 
 import { createController } from "@remix-run/fetch-router";
@@ -11,19 +14,24 @@ import {
   canUseStamp,
   createThread,
   editMessage,
+  getHome,
   getMessageContext,
   getRole,
   getThread,
+  getThreadAccess,
   hideMessage,
   HomeError,
   type ImageInput,
   leaveThread,
+  listGuests,
+  listGuestThreads,
   listMainMessages,
   listMessages,
   listThreadsForViewer,
   type Message,
   pickupIntoThread,
   postMessage,
+  removeGuest,
   renameThread,
   repostMessage,
   toggleReaction,
@@ -38,6 +46,7 @@ import {
   watchMainChannel,
   watchThread,
 } from "../../realtime.ts";
+import { createThreadInvite, INVITE_TTL_MS } from "../../invites.ts";
 import { checkPostLimit, checkRepostLimit } from "../../rate_limit.ts";
 import { getRecentEmojis, pushRecentEmoji } from "../../recent_emojis.ts";
 import { routes } from "../../routes.ts";
@@ -63,6 +72,22 @@ function handleError(error: unknown): Response {
   }
   throw error;
 }
+
+/**
+ * The caller's role for a message's channel: thread access (member or guest)
+ * for a thread post, home membership for a main-channel post.
+ */
+async function channelRole(
+  ctx: { homeId: string; threadId: string | null },
+  userId: string,
+): Promise<string | null> {
+  if (ctx.threadId) {
+    return (await getThreadAccess(ctx.threadId, userId))?.role ?? null;
+  }
+  return await getRole(ctx.homeId, userId);
+}
+
+const notFound = () => Response.json({ error: "not found" }, { status: 404 });
 
 /** Bump the right realtime signal for a message's channel (thread or main). */
 function signalChannel(ctx: { homeId: string; threadId: string | null }) {
@@ -140,25 +165,100 @@ export const threadsController = createController(routes.threadsApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      if (!(await getRole(thread.homeId, userId))) return forbidden();
       await leaveThread(threadId, userId);
       return Response.json({ ok: true });
+    },
+
+    async access(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
+      }
+      const home = await getHome(access.homeId);
+      if (!home) return notFound();
+      return Response.json({
+        role: access.role,
+        home: { id: home.id, name: home.name, themeCss: home.themeCss },
+        thread: access.thread,
+        // A guest's sidebar: only the threads of this home they were let into.
+        guestThreads: access.role === "guest"
+          ? (await listGuestThreads(userId, access.homeId)).map((g) => g.thread)
+          : [],
+      });
+    },
+
+    async guestThreads(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      return Response.json({ guestThreads: await listGuestThreads(userId) });
+    },
+
+    async guests(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) return notFound();
+      if (!(await getRole(thread.homeId, userId))) return forbidden();
+      return Response.json({ guests: await listGuests(threadId) });
+    },
+
+    async removeGuest(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId, userId: guestId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) return notFound();
+      // A guest may leave on their own; otherwise a home admin removes them.
+      if (
+        guestId !== userId &&
+        await getRole(thread.homeId, userId) !== "admin"
+      ) {
+        return Response.json({ error: "admin only" }, { status: 403 });
+      }
+      try {
+        await removeGuest(threadId, guestId);
+        await signalThread(threadId);
+        return Response.json({ ok: true });
+      } catch (error) {
+        return handleError(error);
+      }
+    },
+
+    async invite(context) {
+      const userId = currentUserId(context.get(DpopSession));
+      if (!userId) return unauthorized();
+      const { threadId } = context.params;
+      const thread = await getThread(threadId);
+      if (!thread) return notFound();
+      if (await getRole(thread.homeId, userId) !== "admin") {
+        return Response.json({ error: "admin only" }, { status: 403 });
+      }
+      if (thread.archivedAt) {
+        return Response.json({ error: "スレッドはアーカイブ済みです" }, {
+          status: 409,
+        });
+      }
+      const token = await createThreadInvite(thread.homeId, threadId, userId);
+      return Response.json({ token, ttlMs: INVITE_TTL_MS }, { status: 201 });
     },
 
     async renameThread(context) {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      const role = await getRole(thread.homeId, userId);
-      if (!role) return forbidden();
+      const role = access.role;
       const body = await context.request.json() as { title?: string };
       try {
         const updated = await renameThread({
@@ -301,7 +401,7 @@ export const threadsController = createController(routes.threadsApi, {
       if (!src) {
         return Response.json({ error: "source not found" }, { status: 404 });
       }
-      if (!(await getRole(src.homeId, userId))) {
+      if (!(await channelRole(src, userId))) {
         return Response.json({ error: "cannot access source" }, {
           status: 403,
         });
@@ -341,12 +441,11 @@ export const threadsController = createController(routes.threadsApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      const role = await getRole(thread.homeId, userId);
-      if (!role) return forbidden();
+      const role = access.role;
       return Response.json({
         messages: await listMessages(threadId, userId, role === "admin"),
       });
@@ -356,11 +455,11 @@ export const threadsController = createController(routes.threadsApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      if (!(await getRole(thread.homeId, userId))) return forbidden();
+      const thread = access.thread;
       if (!(await checkPostLimit(userId))) return rateLimited();
       const body = await context.request.json() as {
         body?: string;
@@ -394,11 +493,11 @@ export const threadsController = createController(routes.threadsApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      if (!(await getRole(thread.homeId, userId))) return forbidden();
+      const thread = access.thread;
 
       const body = await context.request.json() as {
         sourceMessageId?: string;
@@ -409,12 +508,13 @@ export const threadsController = createController(routes.threadsApi, {
           status: 400,
         });
       }
-      // Must be able to see the source (member of its home).
+      // Must be able to see the source (member of its home, or guest of its
+      // thread).
       const src = await getMessageContext(body.sourceMessageId);
       if (!src) {
         return Response.json({ error: "source not found" }, { status: 404 });
       }
-      if (!(await getRole(src.homeId, userId))) {
+      if (!(await channelRole(src, userId))) {
         return Response.json({ error: "cannot access source" }, {
           status: 403,
         });
@@ -445,11 +545,10 @@ export const threadsController = createController(routes.threadsApi, {
       const userId = currentUserId(context.get(DpopSession));
       if (!userId) return unauthorized();
       const { threadId } = context.params;
-      const thread = await getThread(threadId);
-      if (!thread) {
-        return Response.json({ error: "not found" }, { status: 404 });
+      const access = await getThreadAccess(threadId, userId);
+      if (!access) {
+        return (await getThread(threadId)) ? forbidden() : notFound();
       }
-      if (!(await getRole(thread.homeId, userId))) return forbidden();
       return sseFromWatch(context.request, await watchThread(threadId));
     },
 
@@ -462,6 +561,8 @@ export const threadsController = createController(routes.threadsApi, {
       if (ctx.authorId !== userId) {
         return Response.json({ error: "author only" }, { status: 403 });
       }
+      // A removed guest (or ex-member) can no longer touch their old posts.
+      if (!(await channelRole(ctx, userId))) return forbidden();
       const body = await context.request.json() as { body?: string };
       try {
         const message = await editMessage({
@@ -482,7 +583,7 @@ export const threadsController = createController(routes.threadsApi, {
       const { messageId } = context.params;
       const ctx = await getMessageContext(messageId);
       if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
-      const role = await getRole(ctx.homeId, userId);
+      const role = await channelRole(ctx, userId);
       if (!role) return forbidden();
       // Author deletion (own post) destroys the body and leaves a tombstone;
       // admin moderation (another's post) hides it but keeps the body.
@@ -505,7 +606,7 @@ export const threadsController = createController(routes.threadsApi, {
       const { messageId } = context.params;
       const ctx = await getMessageContext(messageId);
       if (!ctx) return Response.json({ error: "not found" }, { status: 404 });
-      if (!(await getRole(ctx.homeId, userId))) return forbidden();
+      if (!(await channelRole(ctx, userId))) return forbidden();
       // Main-channel messages (no thread) never archive.
       const thread = ctx.threadId ? await getThread(ctx.threadId) : null;
       if (thread?.archivedAt) {
